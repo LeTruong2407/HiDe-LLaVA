@@ -12,6 +12,7 @@ This repo is the official implementation of ACL 2025 paper: **[HiDe-LLaVA: Hiera
 
 ## News
 
+- **2026.06**: 🔥🔥🔥 Community Highlight: Check out [MCITlib](https://arxiv.org/pdf/2508.07307), an open-source framework for Multimodal Continual Instruction Tuning. It provides out-of-the-box training and evaluation pipelines for 10+ methods across both image and video modalities, fully compatible with 4 diverse base models.
 - **2025.12**: We have released [MCITlib](https://arxiv.org/pdf/2508.07307), the first complete open-source codebase providing benchmarks and methods for Multimodal Continual Instruction Tuning. The code is open sourced [here](https://github.com/Ghy0501/MCITlib).
 - **2025.07**: Check out our new work: "[Federated Continual Instruction Tuning](https://arxiv.org/pdf/2503.12897)" (ICCV 2025). The code is open sourced [here](https://github.com/Ghy0501/FCIT).
 - **2025.06**: Check out our new survey: "[A Comprehensive Survey on Continual Learning in Generative Models](https://arxiv.org/pdf/2506.13045)". We provide a systematic review of continual learning across mainstream generative models—including LLMs, MLLMs, Vision-Language Action Models, and Diffusion Models. Feel free to cite or open pull requests!
