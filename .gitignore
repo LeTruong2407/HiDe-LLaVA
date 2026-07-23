@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments
+.env
+.venv/
+venv/
+env/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+*.log
+wandb/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# Local training assets
+outputs/
+results/
+playground/
+
+# Downloaded models and datasets
+datasets/
+instructions/
+models/
+
+# Common local asset roots
+hide-llava-assets/
+
+# Checkpoints / weights
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Large archives / downloads
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+
+# Generated media / evaluation artifacts
+*.mp4
+*.webm
+*.png
+*.jpg
+*.jpeg
+*.pdf
+
+# Local helper overrides
+scripts/HiDe/paths.local.sh

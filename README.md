@@ -26,13 +26,23 @@ Instruction tuning is widely used to enhance a pre-trained Multimodal Large Lang
 The installation of our environment is the same as [CoIN](https://github.com/zackschen/CoIN).
 
 ```bash
-conda create -n hide python=3.10 -y
-conda activate hide
+conda env create -f environment.yml
+conda activate hide-llava
 pip install --upgrade pip
 pip install -e .
-pip install -e ".[train]"
+```
+
+For Linux + NVIDIA GPU training, install the optional extras after the base setup:
+
+```bash
+pip install -r requirements.gpu-linux.txt
 pip install flash-attn --no-build-isolation
 ```
+
+Notes:
+
+- The original `requirements.txt` shipped in this repository was a machine-specific export and referenced private local paths and a local `flash-attn` wheel. It has been replaced with a portable dependency file.
+- `flash-attn`, `bitsandbytes`, and `deepspeed` are typically Linux/CUDA-only and are not expected to work on macOS or CPU-only systems.
 
 To measure the metrics of caption tasks, please install the following three packages:
 
@@ -131,4 +141,3 @@ Once the data and instructions organized and placed correctly, you can train the
 ## Acknowledgememnt
 
 This repository is built upon the [LLaVA](https://github.com/haotian-liu/LLaVA) and [CoIN](https://github.com/zackschen/CoIN) projects. We sincerely thank the authors for their valuable contributions to the research community.
-

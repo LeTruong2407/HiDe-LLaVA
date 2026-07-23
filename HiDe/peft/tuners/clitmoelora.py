@@ -27,8 +27,6 @@ from .lora import (
     LoraLayer,
     LoraModel,
     mark_only_lora_as_trainable,
-    Linear8bitLt,
-    Linear4bit,
     Embedding,
     Conv2d,
 )
@@ -37,6 +35,14 @@ from ..import_utils import is_bnb_4bit_available, is_bnb_available
 
 if is_bnb_available():
     import bitsandbytes as bnb
+    from .lora import Linear8bitLt
+else:
+    Linear8bitLt = None
+
+if is_bnb_4bit_available():
+    from .lora import Linear4bit
+else:
+    Linear4bit = None
 
 @dataclass
 class HiDeMOELoraConfig(LoraConfig):

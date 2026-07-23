@@ -17,7 +17,7 @@
 import os
 import copy
 from dataclasses import dataclass, field
-import json, deepspeed
+import json
 import logging
 import pathlib, random
 from typing import Dict, Optional, Sequence, List

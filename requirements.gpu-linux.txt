@@ -1,0 +1,11 @@
+# Optional Linux/CUDA extras for full training on an NVIDIA machine.
+# Install this only after `requirements.txt` succeeds.
+
+bitsandbytes==0.41.0
+deepspeed==0.10.3
+triton==2.0.0
+
+# `flash-attn` is intentionally not pinned here because the correct wheel/build
+# depends on your exact CUDA, PyTorch, Python, and GPU toolchain combination.
+# Install it manually if needed, e.g.:
+#   pip install flash-attn --no-build-isolation

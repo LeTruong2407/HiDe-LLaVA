@@ -1,0 +1,13 @@
+name: hide-llava
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - setuptools<70
+  - wheel
+  - git
+  - pillow
+  - pip:
+      - -r requirements.txt
