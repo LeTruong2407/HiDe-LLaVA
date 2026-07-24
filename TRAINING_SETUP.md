@@ -48,6 +48,7 @@ If you want Flash Attention and your machine supports it:
 
 ```bash
 pip install flash-attn --no-build-isolation
+pip install -U setuptools wheel
 ```
 
 ## 3. Edit one file
@@ -70,7 +71,7 @@ At minimum, check or edit:
 Default layout:
 
 ```bash
-$HOME/hide-llava-assets/
+HiDe-LLaVA/hide-llava-assets/
 ├── models/
 │   ├── llava-v1.5-7b/
 │   └── clip-vit-large-patch14-336/
@@ -78,7 +79,7 @@ $HOME/hide-llava-assets/
 └── instructions/
 ```
 
-If you are happy with that layout, you may not need to edit much.
+This matches the current default in `/Users/truongle/Documents/Research_HiDE/HiDe-LLaVA/scripts/HiDe/paths.sh:10`.
 
 ## 4. Login to Hugging Face
 
@@ -109,8 +110,8 @@ Expected outputs:
 
 By default:
 
-- `$HOME/hide-llava-assets/models/llava-v1.5-7b`
-- `$HOME/hide-llava-assets/models/clip-vit-large-patch14-336`
+- `/Users/truongle/Documents/Research_HiDE/HiDe-LLaVA/hide-llava-assets/models/llava-v1.5-7b`
+- `/Users/truongle/Documents/Research_HiDE/HiDe-LLaVA/hide-llava-assets/models/clip-vit-large-patch14-336`
 
 ## 6. Download UCIT data from Hugging Face
 
@@ -147,14 +148,48 @@ Print the external source URLs:
 bash scripts/download/print_external_data_urls.sh
 ```
 
-You still need to manually download some image datasets such as:
+You can now use helper scripts for all external datasets:
+
+```bash
+bash scripts/download/download_arxivqa.sh
+bash scripts/download/download_clevr_math.sh
+```
+
+For `IconQA`, provide the current official archive URL from the IconQA site:
+
+```bash
+ICONQA_ARCHIVE_URL='https://.../iconqa_data.zip' \
+bash scripts/download/download_iconqa.sh
+```
+
+For `VizWiz`, provide the current official archive URLs from the VizWiz captioning page:
+
+```bash
+VIZWIZ_TRAIN_URL='https://...train.zip' \
+VIZWIZ_VAL_URL='https://...val.zip' \
+VIZWIZ_TEST_URL='https://...test.zip' \
+bash scripts/download/download_vizwiz.sh
+```
+
+Or run the wrapper for all external datasets:
+
+```bash
+bash scripts/download/download_all_external.sh
+```
+
+Why are `IconQA` and `VizWiz` parameterized?
+
+- As of **July 23, 2026**, their official download links may change independently of this repo.
+- Their public dataset pages are stable, but their direct archive URLs can be less stable.
+
+You still need current official download URLs for:
 
 - ArxivQA
 - CLEVR-Math
 - IconQA
 - VizWiz
 
-After downloading them, place them under the directories expected by the repo.
+After downloading them, the scripts place them under the directories expected by the repo.
 
 ## 8. Required final folder structure
 
@@ -237,7 +272,32 @@ source scripts/HiDe/paths.sh
 ls "$UCIT_TASK1_TRAIN_JSON"
 ```
 
-## 10. Start training
+### Check all required assets quickly
+
+```bash
+bash scripts/download/check_assets.sh
+```
+
+## 10. Local smoke test first
+
+If you only want to verify that the code path launches on this machine, run the 1-step CPU/local smoke test:
+
+```bash
+conda activate hide-llava
+cd /Users/truongle/Documents/Research_HiDE/HiDe-LLaVA
+bash scripts/HiDe/Train_UCIT/smoke_local.sh
+```
+
+This forces:
+
+- `TRAIN_LAUNCHER=python`
+- batch size `1`
+- `--max_steps 1`
+- `--no_cuda True`
+
+It still requires real model files, instruction JSON, and images to exist under the configured paths.
+
+## 11. Start training
 
 ### Train only task 1
 
@@ -255,7 +315,7 @@ cd /Users/truongle/Documents/Research_HiDE/HiDe-LLaVA
 bash scripts/HiDe/Train_UCIT/train_all.sh
 ```
 
-## 11. What each training script does
+## 12. What each training script does
 
 UCIT training order:
 
@@ -279,7 +339,7 @@ Outputs are written under:
 - ...
 - `$UCIT_OUTPUT_ROOT/Task6_llava_lora_ours`
 
-## 12. Common commands
+## 13. Common commands
 
 ### Re-download models
 
@@ -305,7 +365,14 @@ bash scripts/download/print_external_data_urls.sh
 bash scripts/HiDe/Train_UCIT/Task3.sh
 ```
 
-## 13. Troubleshooting
+### Force non-Deepspeed training
+
+```bash
+export TRAIN_LAUNCHER=python
+bash scripts/HiDe/Train_UCIT/Task1.sh
+```
+
+## 14. Troubleshooting
 
 ### `huggingface-cli: command not found`
 
@@ -317,7 +384,22 @@ conda activate hide-llava
 
 ### `deepspeed: command not found`
 
-You are probably not on the Linux GPU setup yet. Install:
+That is now optional for local testing.
+
+Use the Python fallback:
+
+```bash
+export TRAIN_LAUNCHER=python
+bash scripts/HiDe/Train_UCIT/Task1.sh
+```
+
+Or run the prepared smoke test:
+
+```bash
+bash scripts/HiDe/Train_UCIT/smoke_local.sh
+```
+
+If you want multi-GPU Deepspeed on Linux later, install:
 
 ```bash
 pip install -r requirements.gpu-linux.txt
@@ -351,7 +433,7 @@ source scripts/HiDe/paths.sh
 find "$DATA_ROOT" -maxdepth 2 -type d | sort
 ```
 
-## 14. Short version
+## 15. Short version
 
 If you just want the minimum command sequence:
 
@@ -362,8 +444,16 @@ huggingface-cli login
 bash scripts/download/download_models.sh
 bash scripts/download/download_ucit_hf.sh
 bash scripts/download/print_external_data_urls.sh
-# manually download any remaining external image datasets into $DATA_ROOT
-bash scripts/HiDe/Train_UCIT/Task1.sh
+# use helper scripts for external datasets
+bash scripts/download/download_arxivqa.sh
+bash scripts/download/download_clevr_math.sh
+# fill current official URLs first for the next two:
+# ICONQA_ARCHIVE_URL=...
+# VIZWIZ_TRAIN_URL=...
+# VIZWIZ_VAL_URL=...
+# VIZWIZ_TEST_URL=...
+bash scripts/download/check_assets.sh
+bash scripts/HiDe/Train_UCIT/smoke_local.sh
 ```
 
 If task 1 works, run:

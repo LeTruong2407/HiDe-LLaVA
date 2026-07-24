@@ -1,0 +1,6 @@
+outs:
+- md5: 27a8082e337515a69f83ad4452dee307.dir
+  size: 36987977923
+  nfiles: 219
+  hash: md5
+  path: hide-llava-assets

@@ -127,6 +127,29 @@ Please download [LLaVA](https://huggingface.co/liuhaotian/llava-v1.5-7b) and [CL
 
 Once the data and instructions organized and placed correctly, you can train the model by running `./scripts/CoIN/Train_UCIT/train_all.sh`. After the training is completed, you can evaluate the performance by running `./scripts/CoIN/Eval_UCIT/Eval_all.sh`. **Be careful to modify the paths in all `.sh` files to your own actual paths.**
 
+## DVC + Google Cloud Storage
+
+If you want to keep `hide-llava-assets/` out of Git but reproducible across machines, use DVC with a Google Cloud Storage remote.
+
+Quick start:
+
+```bash
+python -m pip install -r requirements.dvc.txt
+bash scripts/dvc/setup_gcs_remote.sh gs://your-hide-llava-bucket/hide-llava-assets
+bash scripts/dvc/push_assets.sh
+```
+
+Then on another machine:
+
+```bash
+python -m pip install -r requirements.dvc.txt
+bash scripts/dvc/pull_assets.sh
+```
+
+Full guide:
+
+- `DVC_SETUP.md`
+
 ## Citation
 
 ```bibtex

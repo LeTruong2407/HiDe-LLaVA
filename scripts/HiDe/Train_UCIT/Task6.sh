@@ -9,42 +9,6 @@ MODEL_VERSION="vicuna-7b-v1.5"
 ################## LLaMA-2 ##################
 
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../paths.sh"
+source "$SCRIPT_DIR/common.sh"
 
-deepspeed --include "$DEEPSPEED_INCLUDE" --master_port "$MASTER_PORT" llava/train/train_mem_MOE.py \
-    --deepspeed ./scripts/zero2.json \
-    --lora_enable True --lora_r 48 --lora_alpha 96 --mm_projector_lr 2e-5 \
-    --expert_num 6 \
-    --model_name_or_path "$LLAVA_BASE_MODEL" \
-    --previous_task_model_path "$UCIT_OUTPUT_ROOT/Task5_llava_lora_ours" \
-    --version $PROMPT_VERSION \
-    --data_path "$UCIT_TASK6_TRAIN_JSON" \
-    --image_folder "$DATA_ROOT" \
-    --vision_tower "$CLIP_MODEL" \
-    --text_tower "$CLIP_MODEL" \
-    --cur_task 5 \
-    --mm_projector_type mlp2x_gelu \
-    --mm_vision_select_layer -2 \
-    --mm_use_im_start_end False \
-    --mm_use_im_patch_token False \
-    --image_aspect_ratio pad \
-    --group_by_modality_length True \
-    --bf16 True \
-    --output_dir "$UCIT_OUTPUT_ROOT/Task6_llava_lora_ours" \
-    --num_train_epochs 1 \
-    --per_device_train_batch_size 24 \
-    --per_device_eval_batch_size 16 \
-    --gradient_accumulation_steps 1 \
-    --evaluation_strategy "no" \
-    --save_strategy "epoch" \
-    --learning_rate 2e-4 \
-    --weight_decay 0. \
-    --warmup_ratio 0.03 \
-    --lr_scheduler_type "cosine" \
-    --logging_steps 1 \
-    --tf32 True \
-    --model_max_length 2048 \
-    --gradient_checkpointing True \
-    --dataloader_num_workers 4 \
-    --lazy_preprocess True \
-    --report_to none
+launch_ucit_task "$UCIT_TASK6_TRAIN_JSON" "$UCIT_OUTPUT_ROOT/Task6_llava_lora_ours" 5 "$UCIT_OUTPUT_ROOT/Task5_llava_lora_ours"

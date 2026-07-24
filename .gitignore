@@ -64,3 +64,4 @@ hide-llava-assets/
 
 # Local helper overrides
 scripts/HiDe/paths.local.sh
+/hide-llava-assets

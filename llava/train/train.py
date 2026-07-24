@@ -827,6 +827,9 @@ def train():
         if 'mpt' in model_args.model_name_or_path:
             config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path, trust_remote_code=True)
             config.attn_config['attn_impl'] = training_args.mpt_attn_impl
+            config.mm_vision_tower = model_args.vision_tower
+            if model_args.text_tower is not None:
+                config.mm_text_tower = model_args.text_tower
             model = LlavaMPTForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 config=config,
@@ -834,8 +837,16 @@ def train():
                 **bnb_model_from_pretrained_args
             )
         else:
+            config = transformers.AutoConfig.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+            )
+            config.mm_vision_tower = model_args.vision_tower
+            if model_args.text_tower is not None:
+                config.mm_text_tower = model_args.text_tower
             model = LlavaLlamaForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
+                config=config,
                 cache_dir=training_args.cache_dir,
                 **bnb_model_from_pretrained_args,
             )

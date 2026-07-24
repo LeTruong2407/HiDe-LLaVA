@@ -6,11 +6,22 @@ import torch
 import transformers
 from transformers.models.llama.modeling_llama import apply_rotary_pos_emb, repeat_kv
 
+FLASH_ATTN_AVAILABLE = True
+
 try:
     from flash_attn.flash_attn_interface import flash_attn_unpadded_qkvpacked_func
 except ImportError:
-    from flash_attn.flash_attn_interface import flash_attn_varlen_qkvpacked_func as flash_attn_unpadded_qkvpacked_func
-from flash_attn.bert_padding import unpad_input, pad_input
+    try:
+        from flash_attn.flash_attn_interface import flash_attn_varlen_qkvpacked_func as flash_attn_unpadded_qkvpacked_func
+    except ImportError:
+        FLASH_ATTN_AVAILABLE = False
+        flash_attn_unpadded_qkvpacked_func = None
+
+if FLASH_ATTN_AVAILABLE:
+    from flash_attn.bert_padding import unpad_input, pad_input
+else:
+    unpad_input = None
+    pad_input = None
 
 
 def forward(
@@ -103,6 +114,16 @@ def _prepare_decoder_attention_mask(
 
 
 def replace_llama_attn_with_flash_attn():
+    if not FLASH_ATTN_AVAILABLE:
+        warnings.warn(
+            "flash_attn is not installed; using the default LLaMA attention implementation."
+        )
+        return
+    if not torch.cuda.is_available():
+        warnings.warn(
+            "CUDA is not available; skipping flash attention monkey patch and using default attention."
+        )
+        return
     cuda_major, cuda_minor = torch.cuda.get_device_capability()
     if cuda_major < 8:
         warnings.warn(
