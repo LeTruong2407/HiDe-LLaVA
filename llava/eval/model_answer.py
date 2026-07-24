@@ -73,7 +73,13 @@ def eval_model(args):
     disable_torch_init()
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(model_path)
-    tokenizer, model, image_processor, context_len = load_pretrained_model(model_path, args.model_base, model_name, text_tower=args.text_tower)
+    tokenizer, model, image_processor, context_len = load_pretrained_model(
+        model_path,
+        args.model_base,
+        model_name,
+        text_tower=args.text_tower,
+        device=args.device,
+    )
 
     with open(os.path.expanduser(args.question_file), "r") as f:
         questions = json.load(f)
@@ -92,12 +98,13 @@ def eval_model(args):
         idx = line["question_id"]
         cur_prompt = line["text"]
 
-        input_ids = input_ids.to(device='cuda', non_blocking=True)
+        input_ids = input_ids.to(device=args.device, non_blocking=(args.device == "cuda"))
 
         with torch.inference_mode():
+            image_dtype = torch.float16 if args.device == "cuda" else torch.float32
             output_ids = model.generate(
                 input_ids,
-                images=image_tensor.to(dtype=torch.float16, device='cuda', non_blocking=True),
+                images=image_tensor.to(dtype=image_dtype, device=args.device, non_blocking=(args.device == "cuda")),
                 do_sample=True if args.temperature > 0 else False,
                 temperature=args.temperature,
                 top_p=args.top_p,
@@ -138,6 +145,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_beams", type=int, default=1)
     parser.add_argument("--max_new_tokens", type=int, default=128)
     parser.add_argument("--text-tower", type=str)
+    parser.add_argument("--device", type=str, default="cuda")
     args = parser.parse_args()
 
     eval_model(args)

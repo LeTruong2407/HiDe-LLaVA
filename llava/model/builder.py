@@ -41,7 +41,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
             bnb_4bit_quant_type='nf4'
         )
     else:
-        kwargs['torch_dtype'] = torch.float16
+        kwargs['torch_dtype'] = torch.float16 if device == "cuda" else torch.float32
 
     if 'llava' in model_name.lower():
         # Load LLaVA model
@@ -154,13 +154,13 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
         vision_tower = model.get_vision_tower()
         if not vision_tower.is_loaded:
             vision_tower.load_model()
-        vision_tower.to(device=device, dtype=torch.float16)
+        vision_tower.to(device=device, dtype=(torch.float16 if device == "cuda" else torch.float32))
         image_processor = vision_tower.image_processor
 
         text_tower = model.get_text_tower()
         if not text_tower.is_loaded:
             text_tower.load_model()
-        text_tower.to(device=device, dtype=torch.float16)
+        text_tower.to(device=device, dtype=(torch.float16 if device == "cuda" else torch.float32))
 
     if hasattr(model.config, "max_sequence_length"):
         context_len = model.config.max_sequence_length

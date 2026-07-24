@@ -930,9 +930,12 @@ def train():
             model_args=model_args,
             fsdp=training_args.fsdp
         )
-        
+        tower_dtype = torch.bfloat16 if training_args.bf16 else torch.float16
+        if str(training_args.device) == "cpu":
+            tower_dtype = torch.float32
+
         vision_tower = model.get_vision_tower()
-        vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
+        vision_tower.to(dtype=tower_dtype, device=training_args.device)
 
         data_args.image_processor = vision_tower.image_processor
         data_args.is_multimodal = True

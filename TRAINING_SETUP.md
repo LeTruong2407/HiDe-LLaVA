@@ -353,6 +353,47 @@ bash scripts/download/download_models.sh
 bash scripts/download/download_ucit_hf.sh
 ```
 
+### Download a tiny real `ImageNet-R` subset for local tests
+
+```bash
+bash scripts/download/download_imagenet_r_tiny.sh 32
+bash scripts/download/make_tiny_imagenet_r_split.sh 32
+```
+
+This creates:
+
+- `hide-llava-assets/datasets/ImageNet-R/...` with a small set of real images
+- `hide-llava-assets/instructions/ImageNet-R/train_tiny_32.json`
+- `hide-llava-assets/instructions/ImageNet-R/test_tiny_32.json`
+
+You can then point local smoke or Kaggle quick tests at the tiny JSON.
+
+### Download a tiny real `Flickr30k` subset for local tests
+
+```bash
+bash scripts/download/download_flickr30k_tiny.sh 32
+bash scripts/download/make_tiny_flickr30k_split.sh 32
+```
+
+This creates:
+
+- `hide-llava-assets/datasets/Flickr30k/train/...`
+- `hide-llava-assets/datasets/Flickr30k/val/...`
+- `hide-llava-assets/instructions/Flickr30k/train_tiny_32.json`
+- `hide-llava-assets/instructions/Flickr30k/test_tiny_32.json`
+- `hide-llava-assets/instructions/Flickr30k/val_tiny_32.json`
+
+### Train and evaluate tiny `Flickr30k` locally
+
+```bash
+bash scripts/download/download_flickr30k_tiny.sh 32
+bash scripts/download/make_tiny_flickr30k_split.sh 32
+bash scripts/HiDe/Train_UCIT/flickr_tiny_local.sh
+bash scripts/HiDe/Eval_UCIT/eval_flickr30k_tiny_local.sh
+```
+
+This is the best small real-data train/eval path for a local Mac check.
+
 ### Show missing external dataset sources
 
 ```bash

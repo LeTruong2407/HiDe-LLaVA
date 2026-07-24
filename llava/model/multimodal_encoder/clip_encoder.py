@@ -39,14 +39,24 @@ class CLIPVisionTower(nn.Module):
 
     @torch.no_grad()
     def forward(self, images):
+        target_dtype = self.dtype
+        if self.device.type == "cpu":
+            target_dtype = torch.float32
         if type(images) is list:
             image_features = []
             for image in images:
-                image_forward_out = self.vision_tower(image.to(device=self.device, dtype=self.dtype).unsqueeze(0), output_hidden_states=True)
+                image_forward_out = self.vision_tower(
+                    image.to(device=self.device, dtype=target_dtype).unsqueeze(0),
+                    output_hidden_states=True,
+                )
                 image_feature = self.feature_select(image_forward_out).to(image.dtype)
                 image_features.append(image_feature)
+            clip_image_features = None
         else:
-            image_forward_outs = self.vision_tower(images.to(device=self.device, dtype=self.dtype), output_hidden_states=True)
+            image_forward_outs = self.vision_tower(
+                images.to(device=self.device, dtype=target_dtype),
+                output_hidden_states=True,
+            )
             image_features = self.feature_select(image_forward_outs).to(images.dtype)
             clip_image_features = image_forward_outs.image_embeds.to(images.dtype)
 
@@ -54,7 +64,8 @@ class CLIPVisionTower(nn.Module):
 
     @property
     def dummy_feature(self):
-        return torch.zeros(1, self.hidden_size, device=self.device, dtype=self.dtype)
+        dtype = self.dtype if self.device.type != "cpu" else torch.float32
+        return torch.zeros(1, self.hidden_size, device=self.device, dtype=dtype)
 
     @property
     def dtype(self):
@@ -105,6 +116,9 @@ class CLIPTextTower(nn.Module):
 
     @torch.no_grad()
     def forward(self, text_inputs, return_hidden_states=False):
+        target_dtype = self.dtype
+        if self.device.type == "cpu":
+            target_dtype = torch.float32
         # if type(texts_input_ids) is list:
         #     text_features = []
         #     for text_input_ids in texts_input_ids:
@@ -114,17 +128,18 @@ class CLIPTextTower(nn.Module):
         # else:
         text_forward_outs = self.text_tower(**(text_inputs.to(self.device)))
         if return_hidden_states:
-            text_hidden_features = text_forward_outs.last_hidden_state.to(self.dtype)
-            text_features = text_forward_outs.pooler_output.to(self.dtype)
+            text_hidden_features = text_forward_outs.last_hidden_state.to(target_dtype)
+            text_features = text_forward_outs.pooler_output.to(target_dtype)
 
             return [text_hidden_features, text_features]
         else:
-            text_features = text_forward_outs.pooler_output.to(self.dtype)
+            text_features = text_forward_outs.pooler_output.to(target_dtype)
             return text_features
 
     @property
     def dummy_feature(self):
-        return torch.zeros(1, self.hidden_size, device=self.device, dtype=self.dtype)
+        dtype = self.dtype if self.device.type != "cpu" else torch.float32
+        return torch.zeros(1, self.hidden_size, device=self.device, dtype=dtype)
 
     @property
     def dtype(self):
