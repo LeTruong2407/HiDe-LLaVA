@@ -1,0 +1,606 @@
+\documentclass[a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=0.85in]{geometry}
+\usepackage{enumerate}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{tikz} 
+%\usepackage{multicol}
+\usepackage{amsmath,amssymb}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\usepackage{pgf}
+\usepackage[utf8]{inputenc}
+\usetikzlibrary{arrows,automata}
+\usetikzlibrary{positioning}
+
+
+\usetikzlibrary{shadows,arrows}
+% Define the layers to draw the diagram
+\pgfdeclarelayer{background}
+\pgfdeclarelayer{foreground}
+\pgfsetlayers{background,main,foreground}
+
+% Define block styles  
+\tikzstyle{materia}=[draw, fill=blue!20, text width=6.0em, text centered,minimum height=1.5em,drop shadow]
+\tikzstyle{materia_left}=[draw, fill=blue!20, text width=5.5em,minimum height=1.5em,drop shadow]
+\tikzstyle{materia_center}=[draw, fill=blue!20, text width=5.5em,minimum height=1.5em,drop shadow, text centered]
+\tikzstyle{materia_step4}=[draw, fill=blue!20, text width=6.0em, minimum height=1.5em,drop shadow]
+
+\tikzstyle{practica} = [materia, text width=7em, minimum width=8em,minimum height=3em,  rounded corners, drop shadow]
+\tikzstyle{practica_left} = [materia_step4, text width=7em, minimum width=8em,minimum height=3em,  rounded corners, drop shadow]
+\tikzstyle{practicaStep3} = [materia_left, text width=12em, minimum width=15em, minimum height=3em,  rounded corners, drop shadow]
+\tikzstyle{practicaTrain_left} = [materia_left, text width=10em, minimum width=9em, minimum height=3em,  rounded corners, drop shadow]
+\tikzstyle{practicaTrainCenter} = [materia_center, text width=10em, minimum width=9em, minimum height=3em,  rounded corners, drop shadow]
+
+\tikzstyle{texto} = [text centered]
+\tikzstyle{linepart} = [draw, thick, color=black!50, -latex', dashed]
+\tikzstyle{line} = [draw, thick, color=black!50, -latex']
+\tikzstyle{ur}=[draw, text centered, minimum height=0.01em]
+
+% Define distances for bordering
+\newcommand{\blockdist}{1.3}
+\newcommand{\edgedist}{1.5}
+
+\newcommand{\practica}[2]{
+	node (p#1) [practica]
+	{\textit{#2}}
+}
+\newcommand{\practicaStepThree}[2]{
+	node (p#1) [practicaStep3]
+	{\textit{#2}}
+}
+
+\newcommand{\practicaTrain}[2]{
+	node (p#1) [practicaTrain_left]
+	{\textit{#2}}
+}
+\newcommand{\practicaTrainCenter}[2]{
+	node (p#1) [practicaTrainCenter]
+	{\textit{#2}}
+}
+
+\newcommand{\practicaleft}[2]{
+	node (p#1) [practica_left]
+	{\textit{#2}}
+}
+
+% Draw background
+\newcommand{\background}[7]{
+	\path (#1.west |- #2.north)+(-0.7,1.5) node (a1) {};
+	\path (#3.east |- #4.south)+(+0.3,-0.6) node (a2) {};
+	
+	\path (a1)+(#6,-1.3) node (a3) {};	
+	\node () [right=of a3, rectangle split] {
+		\small\textit{#5}
+		 \nodepart{second}\small\textit{#7}
+		};
+			    		   
+	\begin{pgfonlayer}{background}
+		\path[fill=yellow!20,rounded corners, draw=black!50, dotted] (a1) rectangle (a2);
+	\end{pgfonlayer}}
+	
+
+	
+\newcommand{\backgroundDown}[5]{
+	\begin{pgfonlayer}{background}
+		% Left-top corner of the background rectangle
+		\path (#1.west |- #2.north)+(-0.7,0.5) node (a1) {};
+		% Right-bottom corner of the background rectanle
+		\path (#3.east |- #4.south)+(+0.3,-0.6) node (a2) {};
+		% Draw the background
+		\path[fill=yellow!20,rounded corners, draw=black!50, dotted] (a1) rectangle (a2);
+		\path (a1.west)+(0.5,-1.8) node (u1) [texto]{\centering\small\textit{#5}};
+		
+	\end{pgfonlayer}}
+	
+	
+	
+	\newcommand{\transreceptor}[3]{%
+		\path [linepart] (#1.east) -- node [above]
+		{\scriptsize Transreceptor #2} (#3);}
+	
+	
+
+\begin{document}
+\section{Consensus-aware General Expert Construction}
+
+\subsection{Motivation}
+
+Existing methods such as HiDe construct a General Expert by directly merging LoRA experts from the lower Transformer layers. This design is motivated by the empirical observation that shallow layers mainly capture generic visual patterns, whereas deeper layers become increasingly specialized to downstream tasks.
+
+Although effective, this strategy implicitly assumes that the entire LoRA update learned by these shallow layers is transferable across tasks. In practice, however, a LoRA expert is optimized for a specific task and inevitably encodes both transferable knowledge and task-dependent adaptations. Directly averaging complete LoRA experts therefore introduces task-specific information into the shared expert, causing accumulated interference as more tasks are learned.
+
+More importantly, we argue that the transferability of a LoRA expert should not be determined solely from its parameters. A LoRA module never acts independently on its weights, but instead transforms hidden representations through
+
+\begin{equation}
+y=(W+\Delta W)x,
+\end{equation}
+
+where $W$ denotes the frozen pretrained weight, $\Delta W$ is the LoRA update, and $x$ is the hidden representation.
+
+This formulation reveals an important observation: the behavior of a LoRA expert is jointly determined by both its parameter update and the representation directions on which it operates. Consequently, whether a LoRA update is transferable depends not only on the weight matrix itself, but also on the underlying geometry of the hidden representation space.
+
+Based on this observation, rather than directly analyzing the LoRA parameters, we propose to first identify the representation directions that are consistently shared across previous tasks. We then restrict the General Expert to operate only on these consensus representation directions, while preserving task-specific adaptations within individual experts.
+
+The remainder of this section develops this idea by progressively constructing a consensus representation subspace from hidden representation statistics and subsequently decomposing each LoRA expert into transferable and task-specific components.
+
+\paragraph{Scope of the input $x$.} Throughout this section, $x$ denotes the \emph{input activation to a specific linear layer} to which a LoRA module is attached — i.e., $x = h^{(l)}$, the hidden state entering layer $l$ before the frozen weight $W^{(l)}$ is applied — not a pooled sentence- or image-level embedding. Since HiDe attaches an independent LoRA module to every linear projection in every one of the $L{-}1$ ``remaining'' layers (all layers except the top layer), every quantity introduced below ($C_t$, $P_t$, $P_{\mathrm{avg}}$, $P_c$) is computed \emph{per layer} unless stated otherwise; we make this explicit with a layer superscript $(l)$ starting from Section~1.4.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Representation Geometry}
+
+The key idea of our method is that transferable knowledge should be identified from the hidden representation space rather than directly from the LoRA parameters.
+
+Given a hidden representation
+\(
+x\in\mathbb{R}^{d},
+\)
+each feature dimension only describes one coordinate of the representation. Consequently, observing individual feature dimensions cannot reveal how the entire representation is organized in the embedding space. Instead, we are interested in understanding the global geometric structure formed by all hidden representations generated from a task.
+
+Let
+
+\begin{equation}
+X_t=\{x_i\}_{i=1}^{N_t}
+\end{equation}
+
+denote the hidden representations extracted from task $t$, collected at a fixed layer $l$ by running the frozen backbone (with the corresponding task-specific LoRA attached) over a subset of the training data of task $t$.
+
+Rather than analyzing each hidden feature independently, we summarize the entire representation distribution by its second-moment matrix
+
+\begin{equation}
+C_t
+=
+\frac{1}{N_t}
+\sum_{i=1}^{N_t}
+x_i x_i^{\top}.
+\end{equation}
+
+\emph{Terminology.} We follow prior representation-geometry literature (e.g., activation-subspace and CCA-based analyses) in calling $C_t$ a ``covariance-like'' statistic; strictly speaking $C_t=\frac{1}{N_t}\sum_i x_ix_i^\top$ is the \emph{uncentered second-moment (autocorrelation) matrix} of $X_t$, since it is not computed relative to the sample mean $\bar x_t = \frac1{N_t}\sum_i x_i$. We deliberately do \emph{not} center the data: our goal is to identify directions that carry large activation energy from the origin of the representation space, which is what determines how strongly a LoRA update $\Delta W$ (a linear map applied to $x$ itself, not to $x-\bar x_t$) can act along that direction. Centering would instead describe how representations vary \emph{around} their mean, which is a different — and here less relevant — question. We use $C_t$ throughout to mean this uncentered second-moment matrix.
+
+Unlike individual feature vectors, $C_t$ characterizes how the hidden representations are distributed in the embedding space. More specifically, the diagonal entries describe the (uncentered) energy of each feature dimension, while the off-diagonal entries measure the co-activation between different feature dimensions. Consequently, $C_t$ captures the global second-order geometry of the hidden representation distribution instead of memorizing individual samples.
+
+Intuitively, suppose that many hidden representations repeatedly extend along a particular direction in the feature space. Such a direction naturally exhibits large energy and therefore contributes significantly to $C_t$. Conversely, directions that are only activated by a small number of samples produce much smaller energy and contribute less to the overall representation geometry.
+
+Therefore, rather than asking which individual feature dimensions are important, $C_t$ allows us to identify which \emph{directions} in the representation space are consistently utilized by the hidden representations.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\subsubsection{Principal Representation Directions}
+
+To identify these dominant representation directions, we perform Singular Value Decomposition (SVD)
+
+\begin{equation}
+C_t
+=
+U_t
+\Sigma_t
+U_t^{\top},
+\end{equation}
+
+where
+
+\begin{itemize}
+\item
+$U_t=[u_1,u_2,\cdots,u_d]$
+contains orthogonal basis vectors spanning the representation space;
+
+\item
+$\Sigma_t=\mathrm{diag}(\sigma_1,\sigma_2,\cdots,\sigma_d)$
+contains the singular values sorted in descending order
+\(
+\sigma_1\ge\sigma_2\ge\cdots\ge\sigma_d.
+\)
+\end{itemize}
+
+Since $C_t$ is symmetric positive semi-definite, its singular vectors coincide with its eigenvectors. Consequently, each column of $U_t$ represents an orthogonal direction in the hidden representation space, while each singular value measures the amount of variance explained along that direction.
+
+A larger singular value indicates that many hidden representations spread along the corresponding direction, suggesting that this direction captures a dominant geometric pattern shared by numerous samples. Conversely, directions associated with small singular values only explain minor variations and usually correspond to local or task-dependent fluctuations.
+
+Unlike the original feature dimensions, each principal direction is generally a linear combination of multiple feature dimensions. Therefore, principal directions describe intrinsic geometric structures of the representation space instead of isolated feature coordinates.
+
+Accordingly, we retain only the top-$k$ dominant singular vectors
+
+\begin{equation}
+\hat U_t
+=
+[u_1,u_2,\cdots,u_k],
+\end{equation}
+
+which span the principal representation subspace of task $t$.
+
+\paragraph{Efficient estimation via randomized SVD.} Computing the exact eigendecomposition of $C_t\in\mathbb{R}^{d\times d}$ costs $O(d^3)$, which is prohibitive when $d$ is the hidden size of an LLM backbone (e.g., $d=4096$) and this decomposition must be repeated at every one of the $L{-}1$ remaining layers, for every task, throughout continual learning. Since we only need the top-$k$ subspace with $k\ll d$, we instead estimate $\hat U_t$ with \emph{randomized SVD} (Halko et al., 2011): draw a random Gaussian sketch matrix $\Omega\in\mathbb{R}^{d\times (k+p)}$ (with oversampling parameter $p$, e.g., $p=10$), form $Y = C_t\Omega \in \mathbb{R}^{d\times(k+p)}$, orthonormalize $Y$ via QR decomposition to obtain $Q$, project $B = Q^\top C_t Q \in \mathbb{R}^{(k+p)\times(k+p)}$, and eigendecompose the small matrix $B$ to recover the top-$k$ eigenvectors of $C_t$ as $\hat U_t \approx Q \hat V_k$. This reduces the per-layer, per-task cost from $O(d^3)$ to $O(d^2 k)$, which is the dominant remaining cost and comes only from the two matrix–matrix products $C_t\Omega$ and $Q^\top C_t Q$; in practice $C_t$ itself never needs to be materialized explicitly, since $C_t\Omega = \frac{1}{N_t}\sum_i x_i(x_i^\top\Omega)$ can be accumulated directly from the activation stream $X_t$, avoiding the $O(d^2)$ memory cost of storing $C_t$.
+
+\paragraph{Simplification: work directly with the activation matrix, not $C_t$.}To reduce the computational cost, we operate directly on the activation matrix instead of explicitly constructing the covariance matrix. Specifically, let $X_t \in \mathbb{R}^{N_t \times d}$ denote the activation matrix collected from a subset of task-$t$ samples, where each row corresponds to the activation of a sampled token or patch. Since
+\[
+C_t = \frac{1}{N_t} X_t^\top X_t,
+\]
+the right singular vectors of $X_t$ are equivalent to the eigenvectors of $C_t$. Therefore, we perform truncated SVD on $X_t$ and use the top-$k$ right singular vectors to construct the task subspace,
+\[
+\hat{U}_t = V_{[:, :k]}.
+\]
+This approach avoids explicitly forming the $d \times d$ covariance matrix, substantially reducing both computational and memory costs while preserving the same principal subspace. We select $k$ (and $k_c$) according to a variance-retention criterion, and in our experiments with LLaVA-v1.5-7B we sweep $k, k_c \in \{16, 32, 64\}$ with $k_c \leq k$.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\subsubsection{Projection onto the Principal Subspace}
+
+The retained principal directions naturally define an orthogonal projector
+
+\begin{equation}
+P_t
+=
+\hat U_t
+\hat U_t^{\top}.
+\end{equation}
+
+The matrix $P_t$ projects any hidden representation onto the principal representation subspace learned from task $t$.
+
+Given an arbitrary hidden representation $x$, its projected representation is
+
+\begin{equation}
+x_p
+=
+P_t x.
+\end{equation}
+
+From the perspective of least-squares approximation, $x_p$ is the closest representation lying inside the principal subspace spanned by $\hat U_t$. Therefore, the projection preserves the dominant geometric structures while discarding components lying outside the principal representation subspace.
+
+Intuitively, $P_t$ acts as a geometric filter. Instead of selecting individual feature dimensions, it selectively preserves representation directions that capture the majority of the hidden representation variance. Consequently, $P_t$ summarizes the dominant representation geometry of task $t$, which serves as the foundation for constructing a consensus representation shared across multiple tasks.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Shared Representation Hypothesis}
+
+The preceding section demonstrates how the second-moment matrix characterizes the geometry of the hidden representation space and how its principal directions capture the dominant representation patterns of an individual task. The remaining question is whether these principal directions also reflect transferable knowledge across multiple tasks.
+
+Our method is built upon the following hypothesis.
+
+\paragraph{Assumption 1 (Shared Representation Hypothesis).}
+Transferable knowledge induces stable principal representation subspaces across related tasks, whereas task-specific adaptations primarily reside in directions that are not consistently shared among tasks.
+
+This assumption is motivated by the learning behavior of large vision-language models. During continual learning, different tasks may contain distinct semantic categories, yet they often rely on similar low-level visual concepts and common intermediate representations inherited from the pretrained backbone. Consequently, although the hidden representations generated by different tasks are not identical, they tend to occupy similar dominant subspaces in the representation space.
+
+Conversely, task-specific adaptations are only required to distinguish concepts unique to an individual task. Such adaptations generally influence only a small portion of the representation space and therefore appear as directions that are inconsistent across different tasks.
+
+Under this assumption, the transferable knowledge of previous tasks can be approximated by identifying the representation directions that repeatedly appear in the principal subspaces of multiple tasks rather than those unique to individual tasks.
+
+\paragraph{Empirical validation — required before implementation.} Assumption 1 is an empirical claim and \textbf{must} be verified before it is used to justify the fusion rule in Section~1.7, in the same spirit as HiDe's own layer-wise CKA study (their Fig.~1) that motivated its top-layer/remaining-layer split. Given limited implementation time (seminar-scale project), we recommend running this validation \emph{first}, as a cheap, self-contained pilot study, before touching the training/inference pipeline of HiDe-LLaVA:
+\begin{enumerate}[label=(\roman*)]
+\item Fine-tune LoRA experts on a sequence of 2--3 tasks from the UCIT benchmark (a small subset is enough for a pilot; the full 6-task sequence is only needed for the final experiment).
+\item At one or two representative remaining layers $l$ (e.g., an early layer and a mid layer, not all 31), extract $\hat U_t^{(l)}$ for every task pair $(t,t')$ and measure the \emph{principal angles} $\theta_i = \arccos(\sigma_i)$ between $\mathrm{span}(\hat U_t^{(l)})$ and $\mathrm{span}(\hat U_{t'}^{(l)})$, summarized by the subspace similarity $\frac1k\sum_i \cos\theta_i \in [0,1]$.
+\item Check whether this similarity is (a) consistently high across most task pairs at the remaining layers — analogous to the high CKA similarity HiDe observes below the top layer — and (b) higher than the similarity of the task-specific complement subspaces (the bottom eigenvectors of $C_t$), which would confirm that transferable information concentrates in the top-$k$ subspace rather than being spread uniformly.
+\end{enumerate}
+If subspace overlap across tasks is already close to 1 without any special treatment, the added value of consensus-aware filtering over HiDe's plain averaging would be limited, and the fusion coefficients or $k_c$ should be tuned accordingly; if overlap is low, the hypothesis motivates the decomposition proposed below. \textbf{This pilot should gate the rest of the implementation}: only proceed to Sections~1.4--1.7 at full scale (all 31 remaining layers, all linear projections, all 6 tasks) once the pilot shows a meaningful similarity gap between the top-$k$ and bottom subspaces; otherwise, scale down the scope (e.g., apply consensus filtering only to the layers/projections where the gap is largest) rather than instrumenting every linear layer up front.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\subsection{Consensus Representation Geometry}
+
+Suppose that after learning $T$ tasks, each task produces its own principal projection matrix at layer $l$,
+
+\begin{equation}
+P_t^{(l)}
+=
+U_t^{(l)}{U_t^{(l)}}^\top,
+\qquad
+t=1,\ldots,T,\quad l=1,\ldots,L-1,
+\end{equation}
+
+where $U_t^{(l)}$ contains the top-$k$ principal directions extracted from the second-moment matrix of task $t$ \emph{at layer $l$}. We introduce the explicit layer index $(l)$ here because the remaining $L-1$ layers do not share statistics: each layer receives a differently-distributed activation stream, so a single global $P_c$ would conflate geometrically unrelated subspaces. Everything below is understood to be computed independently for each layer $l$; we drop the superscript $(l)$ again for readability except where the per-layer nature matters.
+
+Each projection matrix can be interpreted as a geometric indicator describing which representation directions are considered important by the corresponding task. Therefore, rather than directly comparing the principal directions themselves, we aggregate their projection operators.
+
+Specifically, we compute the average projection matrix
+
+\begin{equation}
+P_{\mathrm{avg}}
+=
+\frac{1}{T}
+\sum_{t=1}^{T}
+P_t.
+\end{equation}
+
+Unlike averaging LoRA parameters, averaging projection matrices possesses a clear geometric interpretation.
+
+Each projector $P_t$ assigns high responses to representation directions lying inside the principal subspace of task $t$ and suppresses directions outside that subspace. Consequently, each task can be viewed as casting one geometric vote over the representation space.
+
+After averaging all projectors, directions that are repeatedly selected by many tasks accumulate large responses, whereas directions appearing only in a few tasks gradually vanish.
+
+Therefore, $P_{\mathrm{avg}}$ naturally estimates how frequently each representation direction is shared across previous tasks.
+
+However, since the arithmetic average of multiple orthogonal projectors is generally no longer idempotent ($P_{\mathrm{avg}}^2 \ne P_{\mathrm{avg}}$ unless every $P_t$ coincides), it is \emph{not itself} an orthogonal projector and cannot be directly used to project hidden representations; it should instead be understood as a symmetric positive semi-definite ``voting'' matrix whose eigenvalues lie in $[0,1]$ (this follows from $0\preceq P_t\preceq I$ for every projector and the fact that the Loewner order $0\preceq A\preceq I$ is preserved under convex combination), with an eigenvalue near $1$ indicating a direction selected by (nearly) all tasks and an eigenvalue near $0$ indicating a direction selected by none.
+
+To recover a valid projection operator, we further perform Singular Value Decomposition
+
+\begin{equation}
+P_{\mathrm{avg}}
+=
+U_c
+\Sigma_c
+U_c^\top.
+\end{equation}
+
+The dominant singular vectors of $P_{\mathrm{avg}}$ correspond to the representation directions receiving the strongest consensus among previous tasks.
+
+Keeping the leading $k_c$ singular vectors,
+
+\begin{equation}
+\hat U_c
+=
+[u_1,\cdots,u_{k_c}],
+\end{equation}
+
+we finally construct the consensus projection matrix
+
+\begin{equation}
+P_c
+=
+\hat U_c
+\hat U_c^\top.
+\end{equation}
+
+Unlike the task-specific projectors, the consensus projector is estimated from all previously observed tasks and therefore captures the representation directions that are consistently preserved throughout continual learning.
+
+Intuitively, $P_c$ can be interpreted as the dominant consensus subspace estimated from multiple task-specific subspaces. This construction is closely related to the \emph{Karcher / flag mean} of a set of subspaces on the Grassmann manifold, of which averaging projectors followed by re-projection is a well-known first-order approximation; we do not claim it recovers the exact geodesic mean, only that it favors directions repeatedly supported by multiple tasks, making it a computationally cheap approximation of the transferable representation subspace.
+
+\paragraph{Incremental update across tasks — memory-aware version.} Because continual instruction tuning processes tasks sequentially, recomputing $P_{\mathrm{avg}}$ from scratch over all $T$ tasks after every new task is unnecessary. A naive incremental scheme would maintain a running sum $S_T = \sum_{t=1}^T P_t$ and store it densely as a $d\times d$ matrix per layer. \textbf{We flag this as impractical at the scale HiDe-LLaVA operates at}: HiDe attaches an independent LoRA (and hence an independent consensus statistic) to \emph{every linear projection} in every remaining layer — typically 7 projections (q,k,v,o,gate,up,down) $\times$ 31 layers $\approx$ 217 projections for a 7B-scale LLaVA backbone. Storing one dense $d\times d = 4096\times 4096$ matrix in fp32 per projection costs $\approx 64\,\text{MB}$, i.e.\ $\approx 13.6\,\text{GB}$ in total — far larger than the LoRA parameters HiDe itself stores (Table~3 reports $44.27\,\text{M}$ params total, i.e.\ $\approx 170\,\text{MB}$), and directly undermines the parameter-efficiency argument HiDe-LLaVA makes against O-LoRA/MoELoRA in Fig.~6.
+
+Instead, since each $P_t=\hat U_t\hat U_t^\top$ is rank-$k$ and $T$ (the number of tasks, e.g.\ 6 in UCIT) is small relative to $d$, we avoid materializing $S_T$ at all and instead store only the low-rank factors $\hat U_t\in\mathbb{R}^{d\times k}$ for each past task, stacked as $\tilde U = [\hat U_1 \mid \cdots \mid \hat U_T] \in \mathbb{R}^{d\times Tk}$. Then $P_{\mathrm{avg}} = \frac1T \tilde U\tilde U^\top$, and its top-$k_c$ eigenvectors can be obtained by an SVD of the much smaller matrix $\tilde U$ (cost $O(d(Tk)^2)$ instead of $O(d^3)$, and no $d\times d$ matrix is ever formed). Concretely, this reduces the per-projection storage from $64\,\text{MB}$ to $d\times Tk \times 4\,\text{bytes} \approx 4096\times(6\times32)\times4\,\text{bytes}\approx 3.1\,\text{MB}$ (for $k{=}32$, $T{=}6$) — about $20\times$ smaller, and comparable in order of magnitude to the LoRA parameters themselves. Upon finishing task $T{+}1$, we simply append $\hat U_{T+1}$ to $\tilde U$ (no update to previously stored factors is needed) and recompute the small SVD above.
+
+\paragraph{Correction: this state is persistent, not discardable, and should eventually use a bounded-memory update.} An earlier version of this note suggested that these statistics ``can be discarded after training if desired.'' This was imprecise: because $P_{\mathrm{avg}}$ must be recomputed after \emph{every} future task, and raw activations from past tasks are typically unavailable in a continual-learning setting (no rehearsal), the per-task factors $\hat U_t$ (or an equivalent compressed summary) must be \textbf{retained for the duration of the continual-learning session itself} — they are analogous to an auxiliary statistics bank kept alongside the model checkpoint, not a one-off byproduct of training a single task. They are \emph{not}, however, needed for standalone inference on the already-fused model, so a deployed/exported model that only serves predictions carries no extra cost; the persistence requirement is specific to whoever continues the continual-learning process. Given $T{=}6$ in UCIT/CoIN, the simple stacking scheme above is already practical ($\lesssim$1\,GB across all $\sim$217 projections) and we recommend it as the default. For settings with many more tasks, where $Tk$ eventually approaches or exceeds $d$, plain stacking stops being memory-bounded; the principled fix, following the bounded-memory incremental subspace update recently proposed for a closely related problem (Share: \emph{``Shared LoRA Subspaces for almost Strict Continual Learning''}, Kaushik et al., 2026), is to maintain a fixed-size basis of rank $k_c$ and fold in each new $P_{t}$ as a rank-$k$ perturbation via an analytical/incremental SVD update (e.g., Brand's incremental SVD), rather than growing $\tilde U$ without bound. We treat this as an optional scalability upgrade rather than part of the core proposal, since it is not required at the scale of the UCIT/CoIN benchmarks.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Consensus-aware LoRA Decomposition}
+
+Having constructed the consensus representation projector $P_c$, we now show how it can be naturally incorporated into LoRA.
+
+Unlike conventional parameter decomposition methods, our objective is not to directly partition the LoRA weights themselves. Instead, we decompose the action of a LoRA expert according to the representation subspace on which it operates.
+
+Recall that a LoRA expert modifies the hidden representation through
+
+\begin{equation}
+y=(W+\Delta W)x,
+\end{equation}
+
+where $W$ denotes the frozen pretrained weight and $\Delta W$ is the task-specific LoRA update, and, as noted in Section~1.1, $x=h^{(l)}$ is the input activation to this particular layer.
+
+Since the identity matrix admits the orthogonal decomposition
+
+\begin{equation}
+I=P_c+(I-P_c),
+\end{equation}
+
+every hidden representation can be uniquely decomposed into
+
+\begin{equation}
+x=P_cx+(I-P_c)x,
+\end{equation}
+
+where
+
+\begin{itemize}
+\item $P_cx$ denotes the component lying inside the consensus representation subspace;
+
+\item $(I-P_c)x$ represents the complementary component orthogonal to the consensus subspace.
+\end{itemize}
+
+Substituting the above decomposition into the LoRA transformation gives
+
+\begin{align}
+\Delta Wx
+&=
+\Delta W(P_c+(I-P_c))x
+\\
+&=
+\Delta WP_cx
++
+\Delta W(I-P_c)x
+\\
+&=
+(\Delta WP_c)x
++
+(\Delta W(I-P_c))x.
+\end{align}
+
+Because the above equality holds for arbitrary hidden representations, the LoRA update itself admits the decomposition
+
+\begin{equation}
+\boxed{
+\Delta W
+=
+\Delta W P_c
++
+\Delta W(I-P_c).
+}
+\end{equation}
+
+Importantly, this decomposition is not introduced as an additional assumption. Instead, it follows directly from the orthogonal decomposition of the hidden representation space induced by the consensus projector, and it holds exactly regardless of whether Assumption 1 is true — Assumption 1 is only needed to justify \emph{why} $\Delta W P_c$ should be treated as the transferable component.
+
+\paragraph{Low-rank cost.} Since LoRA parameterizes $\Delta W = BA$ with $B\in\mathbb{R}^{d\times r}$, $A\in\mathbb{R}^{r\times d}$ and rank $r\ll d$ (HiDe uses $r{=}8$), the shared component can be computed as $\Delta W P_c = B(AP_c)$, which costs $O(rd\,k_c)$ (via $A(\hat U_c(\hat U_c^\top))$) rather than forming the dense $d\times d$ matrix $\Delta W$ explicitly, and $A P_c$ remains a rank-$\min(r,k_c)$ update. This keeps the per-task, per-layer overhead of the decomposition small relative to LoRA fine-tuning itself.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\paragraph{Interpretation}
+
+The two terms possess clear geometric meanings.
+
+The first component
+
+\begin{equation}
+\Delta W_{\mathrm{shared}}
+=
+\Delta W P_c
+\end{equation}
+
+only transforms representation directions lying inside the consensus subspace. Since these directions are repeatedly observed across multiple previous tasks, this component naturally captures knowledge that is likely to be transferable.
+
+The second component
+
+\begin{equation}
+\Delta W_{\mathrm{specific}}
+=
+\Delta W(I-P_c)
+\end{equation}
+
+operates exclusively on representation directions outside the consensus subspace.
+
+These directions correspond to representations that are rarely shared among previous tasks and therefore mainly capture task-specific adaptations required by the current task.
+
+Consequently, the proposed decomposition separates each LoRA expert into a transferable component and a task-specific component according to the geometry of the hidden representation space rather than according to the parameter values themselves.
+
+This distinction is fundamentally different from previous continual learning approaches, which directly regularize or merge complete LoRA parameters without explicitly considering the representation subspace on which those parameters operate.
+
+\textbf{Important architectural caveat.} Unlike the top-layer LoRA in HiDe-LLaVA, which is explicitly kept as one module per task (a MoE-like expansion, Section~4.2.1 of HiDe), the remaining layers in HiDe-LLaVA are fused into a \emph{single} expert $\bar E_T$ with no per-task storage (this is precisely what keeps HiDe's remaining-layer memory footprint constant in $T$; see Table~3/Fig.~6 of HiDe). There is therefore no ``individual task expert'' at the remaining layers into which $\Delta W_{\mathrm{specific}}$ could be placed without reintroducing the $O(T)$ memory growth that HiDe explicitly avoids (and that the paper criticizes O-LoRA for). We revise the fusion rule in Section~1.6 accordingly: rather than claiming $\Delta W_{\mathrm{specific}}$ is ``retained'' anywhere, we \emph{down-weight} it in the single fused expert instead of dropping it or storing it separately — see the discussion after Eq.~(19) below.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Why Consensus-aware Decomposition?}
+
+The proposed decomposition provides a geometric interpretation of how a LoRA expert interacts with the hidden representation space.
+
+Recall that the output variation introduced by a LoRA expert is
+
+\begin{equation}
+\Delta y
+=
+\Delta Wx.
+\end{equation}
+
+Using the consensus decomposition of the hidden representation,
+
+\[
+x=P_cx+(I-P_c)x,
+\]
+
+the output variation can be rewritten as
+
+\begin{equation}
+\Delta y
+=
+\Delta WP_cx
++
+\Delta W(I-P_c)x.
+\end{equation}
+
+Therefore, the overall functional behavior of a LoRA expert is naturally decomposed into two additive components (not statistically independent components — we use ``independent'' only in the informal sense that each term is driven by a disjoint, orthogonal subset of representation directions).
+
+The first component,
+
+\[
+\Delta WP_cx,
+\]
+
+only modifies representation directions lying inside the consensus subspace.
+
+Since these directions are repeatedly shared across previous tasks, the induced output variation is expected to remain useful even after learning future tasks.
+
+Conversely,
+
+\[
+\Delta W(I-P_c)x
+\]
+
+only affects representation directions outside the consensus subspace.
+
+These directions correspond to representations that are rarely reused by previous tasks and therefore mainly capture task-specific adaptations.
+
+Consequently, directly merging the complete LoRA update inevitably transfers both shared knowledge and task-specific adaptations into the General Expert.
+
+Our decomposition instead isolates the transferable component before expert fusion, thereby reducing task-specific contamination accumulated during continual learning.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Consensus-aware General Expert Fusion}
+
+The original HiDe framework constructs the General Expert by directly averaging all LoRA experts,
+
+\begin{equation}
+\Delta W_G
+=
+\frac1T
+\sum_{t=1}^{T}
+\Delta W_t.
+\end{equation}
+
+Although simple, this strategy assumes that every parameter update learned by the lower Transformer layers is equally transferable across tasks.
+
+However, according to the proposed decomposition,
+
+\[
+\Delta W_t
+=
+\Delta W_tP_c
++
+\Delta W_t(I-P_c),
+\]
+
+only the first component consistently operates on the consensus representation subspace.
+
+\paragraph{Revised fusion rule.} As noted in Section~1.5, HiDe-LLaVA's remaining layers keep only a \emph{single} fused expert — there is no per-task slot to store $\Delta W_t(I-P_c)$ separately. We therefore do not remove the task-specific component from the fusion; instead we \emph{down-weight} it relative to the consensus component, using a single extra scalar hyperparameter $\eta\in[0,1]$:
+
+\begin{equation}
+\boxed{
+\Delta W_G
+=
+\frac1T
+\sum_{t=1}^{T}
+\Big(
+\Delta W_tP_c
++
+\eta\,\Delta W_t(I-P_c)
+\Big).
+}
+\end{equation}
+
+This keeps the memory footprint of the remaining layers exactly the same as vanilla HiDe (still one fused expert, same parameter count — the only overhead is the consensus statistics discussed in Section~1.4, which are not part of the model's forward-pass parameters and can be discarded after training if desired). Two special cases recover interpretable baselines: $\eta{=}1$ reduces exactly to HiDe's original uniform average $\Delta W_G=\frac1T\sum_t\Delta W_t$ (sanity check that our decomposition is a strict generalization, not a different fusion mechanism); $\eta{=}0$ is the ``hard filtering'' variant originally proposed in this section, which fuses only the consensus component and \emph{discards} the task-specific component entirely (rather than an unrealizable ``retain separately''). We treat $\eta$ as a hyperparameter to be swept (e.g., $\eta\in\{0,0.25,0.5,0.75,1.0\}$) alongside the fusion-coefficient ablation HiDe already performs (their Fig.~5), since $\eta{=}0$ risks discarding transferable-but-not-yet-consensus information from a task that only future tasks would corroborate, while $\eta{=}1$ recovers no benefit over the baseline.
+
+Meanwhile, the complementary component
+
+\begin{equation}
+\Delta W_t(I-P_c)
+\end{equation}
+
+is down-weighted (by factor $\eta$) rather than fully discarded or separately retained, so that task-specific adaptations contribute less to repeated fusion across tasks without requiring additional per-task storage in the remaining layers.
+
+This design allows the General Expert to preserve representation transformations that are consistently shared across previous tasks while reducing (rather than eliminating, unless $\eta{=}0$) the extent to which task-specific adaptations are accumulated through repeated expert fusion — all within HiDe's original memory budget for the remaining layers.
+
+\paragraph{Relation to HiDe's fusion coefficients.} HiDe's remaining-layer fusion (their Eq.~6) uses learned coefficients $\epsilon_i$ per task, $\bar E_T = \sum_i \epsilon_i E_i$; our $\Delta W_G$ above uses a uniform average purely for clarity of exposition. The two are compatible: $P_c$/$\eta$ and $\epsilon_i$ address orthogonal design questions — \emph{which representation directions} to fuse and how strongly (our contribution) versus \emph{how much weight} to give each task's contribution (HiDe's contribution) — so in practice we recommend combining them as $\Delta W_G = \sum_{t=1}^T \epsilon_t\, (\Delta W_t P_c + \eta\,\Delta W_t(I-P_c))$, reusing HiDe's fusion coefficients on top of our consensus filtering.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Related Work and Positioning}
+
+The general idea of decomposing a LoRA update into a task-shared and a task-specific representation subspace is \textbf{not unique to this proposal} and has close, contemporaneous counterparts that should be cited and differentiated from explicitly rather than presented as entirely novel:
+
+\begin{itemize}
+\item \textbf{Null-space / orthogonal-projection CL methods} (O-LoRA (Wang et al., 2023, already a baseline in HiDe-LLaVA), InfLoRA (Liang \& Li, 2024), Adam-NSCL (Wang et al., 2021), GPM (Saha et al., 2021)) constrain \emph{new} task updates to the null space (or estimated orthogonal complement) of \emph{past} tasks' input/gradient subspaces, so as to avoid interfering with them. This is the opposite direction of composition from our proposal: they gate what a \emph{new} task is allowed to learn, whereas we gate what gets \emph{fused} from already-learned experts into a shared General Expert. Recent work (NESS, 2026; the LoDA paper below) points out that under correlated tasks, null spaces of successive tasks can overlap substantially, so the ``isolated'' subspace found this way may not be as clean as intended — a caveat that also applies to any null-space-style baseline compared against in the final experiments.
+\item \textbf{LoDA} (``Task-Driven Subspace Decomposition for Knowledge Sharing and Isolation in LoRA-based Continual Learning'', He et al., ICML 2026) is the closest prior work conceptually: it explicitly decomposes the LoRA update space into a \emph{general} (shared) and a \emph{truly isolated} (task-specific) subspace via energy-based objectives, and performs a closed-form recalibration of the general component before merging it into the backbone — structurally parallel to our $P_c$ + $\Delta W_G$ construction. The key difference is scope: LoDA is a standalone, general-purpose LoRA-CL algorithm (single backbone, no layer-wise decoupling), whereas our proposal is scoped specifically to \emph{replace only the remaining-layer fusion step inside HiDe-LLaVA's existing hierarchical top-layer/remaining-layer split} — we do not touch the top-layer MoE-style expansion, and our decomposition is derived from representation-subspace projectors rather than an energy-based training objective. This should be stated explicitly in any write-up, and, resources permitting, LoDA is a natural additional baseline (beyond O-LoRA/MoELoRA, which HiDe already compares against) for the final experiments.
+\item \textbf{Share} (``Shared LoRA Subspaces for almost Strict Continual Learning'', Kaushik et al., 2026) independently arrives at the idea of an incrementally-updated shared low-rank subspace with strictly bounded memory (reported up to 100--281$\times$ savings over per-task LoRA), using analytical SVD updates rather than storing raw per-task factors. As noted in Section~1.4, this is the right template to follow if the stacked-factor storage described there ever needs to be replaced by a fixed-memory scheme (e.g., for $T\gg 6$).
+\item \textbf{SplitLoRA} (gradient-space splitting into primary/minor subspaces) and \textbf{BiLoRA/PLAN} (fixed orthogonal bases on LoRA down-projections) are further recent variants in the same family, listed here for completeness of the literature review rather than as direct baselines.
+\end{itemize}
+
+Given this landscape, the proposal's genuine novelty is narrower than ``subspace decomposition for LoRA merging'' in general (which is now a fairly populated area as of 2025--2026) and should instead be framed as: \emph{applying consensus-projector-based subspace filtering specifically within HiDe-LLaVA's hierarchical decoupling architecture, at the remaining-layer fusion step only}, evaluated against HiDe-LLaVA's own baselines (Table~1/2) plus LoDA/Share if time permits. This is still a reasonable and implementable seminar-scale contribution — it does not need to out-general LoDA or Share, only to show that consensus filtering measurably improves HiDe-LLaVA's own remaining-layer fusion rule on the UCIT/CoIN benchmarks.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Discussion}
+
+Our method differs fundamentally from existing expert-merging approaches.
+
+Previous methods directly average LoRA parameters under the implicit assumption that the entire parameter update is transferable.
+
+Instead, our method first analyzes the geometry of the hidden representation space to estimate a consensus representation subspace shared across previous tasks.
+
+The LoRA update is then decomposed according to this representation geometry before expert fusion.
+
+Consequently, the proposed framework performs expert merging in the representation space rather than directly in the parameter space, allowing transferable knowledge to be selectively preserved while suppressing task-specific interference.
+
+\paragraph{Practical considerations and open questions.} We summarize the main implementation choices and caveats discussed above, to be resolved before/while implementing:
+\begin{itemize}
+\item \textbf{Per-layer, not global, statistics.} $C_t$, $P_t$, $P_{\mathrm{avg}}$, and $P_c$ must all be estimated independently for each of the $L-1$ remaining layers (Section~1.4); a single global consensus subspace is not meaningful across layers with different activation distributions.
+\item \textbf{Cost control via randomized SVD on the activation matrix, not on $C_t$.} Exact eigendecomposition of $d\times d$ second-moment matrices is infeasible at LLM scale. The correct, PyTorch-native fix is \texttt{torch.svd\_lowrank(X\_t, q=k+p)} applied directly to the collected activation matrix $X_t\in\mathbb{R}^{N_t\times d}$ (not to a lazily-materialized $C_t$, which \texttt{torch.svd\_lowrank} does not support) — see Section~1.2.1.
+\item \textbf{Memory-aware, persistent incremental estimation.} $P_{\mathrm{avg}}$ must \emph{not} be stored as a dense $d\times d$ running sum per projection — at HiDe-LLaVA's scale ($\sim$217 LoRA-attached projections) this would cost $\sim$13.6\,GB and defeat the parameter-efficiency argument of the base method. Store only the stacked low-rank factors $\hat U_t$ per task instead (Section~1.4); note this state must persist across the whole continual-learning session (it is \emph{not} discardable after a single task, though it is not needed for standalone inference on the final fused model), and should be replaced by a bounded-memory incremental SVD update (à la Share, see Section~1.7) if $T$ grows large.
+\item \textbf{Position against contemporaneous prior art.} LoDA (ICML 2026) and Share (2026) independently propose closely related shared/isolated subspace decompositions for LoRA-based CL (Section~1.7). Frame this proposal's contribution narrowly — as a HiDe-LLaVA-specific remaining-layer fusion improvement — and cite/differentiate explicitly rather than presenting the subspace-decomposition idea as unprecedented.
+\item \textbf{No separate per-task storage at remaining layers.} HiDe-LLaVA keeps a single fused expert at the remaining layers (unlike the top layer). The fusion rule in Section~1.6 must reflect this: the task-specific component $\Delta W_t(I-P_c)$ is down-weighted by $\eta$ within the single fused expert, not stored separately.
+\item \textbf{Empirical validation of Assumption 1 gates the implementation.} Run the small-scale principal-angle pilot (Section~1.3) on 2--3 tasks and 1--2 layers \emph{before} instrumenting all 31 remaining layers $\times$ 7 projections; only scale up if the pilot shows a genuine similarity gap between top-$k$ and bottom subspaces.
+\item \textbf{Choice of $k$, $k_c$, and $\eta$.} All three are hyperparameters; we suggest starting from $k,k_c\in\{16,32,64\}$ (with $k_c\le k$) and $\eta\in\{0,0.25,0.5,0.75,1.0\}$, selecting $k,k_c$ via the variance-retention criterion of Section~1.2.1 and validating sensitivity of $\eta$ empirically, analogous to HiDe's ablation of the fusion coefficient (their Fig.~5).
+\end{itemize}
+
+\end{document}
