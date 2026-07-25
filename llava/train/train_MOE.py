@@ -169,9 +169,19 @@ def get_peft_state_maybe_zero_3(named_params, bias):
 
 
 def get_peft_state_non_lora_maybe_zero_3(named_params, require_grad_only=True):
+    always_save = (
+        "image_anchors.",
+        "text_anchors.",
+        "image_boundary.",
+        "text_boundary.",
+    )
     to_return = {k: t for k, t in named_params if "lora_" not in k}
     if require_grad_only:
-        to_return = {k: t for k, t in to_return.items() if t.requires_grad}
+        to_return = {
+            k: t
+            for k, t in to_return.items()
+            if t.requires_grad or any(marker in k for marker in always_save)
+        }
     to_return = {k: maybe_zero_3(v, ignore_status=True).cpu() for k, v in to_return.items()}
     return to_return
 
@@ -1112,7 +1122,6 @@ def train():
         consensus_summary = None
         if model_args.consensus_enable and training_args.local_rank in (-1, 0):
             consensus_summary = model.finalize_consensus_task()
-        model.set_boundary_for_save()
         state_dict = get_peft_state_maybe_zero_3(
             model.named_parameters(), training_args.lora_bias
         )

@@ -88,17 +88,9 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             param.requires_grad = False
 
     def set_boundary_for_save(self):
-        for name, param in self.image_boundary.named_parameters():
-            param.requires_grad = True
-        
-        for name, param in self.text_boundary.named_parameters():
-            param.requires_grad = True
-
-        for name, param in self.image_anchors.named_parameters():
-            param.requires_grad = True
-        
-        for name, param in self.text_anchors.named_parameters():
-            param.requires_grad = True
+        # Kept for compatibility with older entrypoints. Checkpoint collectors
+        # must include these frozen running statistics explicitly.
+        return
 
     def get_model(self):
         return self.model
