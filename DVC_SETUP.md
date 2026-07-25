@@ -31,7 +31,8 @@ gs://your-hide-llava-bucket/hide-llava-assets
 From the repo root:
 
 ```bash
-bash scripts/dvc/setup_gcs_remote.sh gs://your-hide-llava-bucket/hide-llava-assets
+bash scripts/dvc/setup_gcs_remote.sh gs://dvc_example_project/dvc_example_project
+
 ```
 
 This will:
@@ -90,7 +91,52 @@ bash scripts/dvc/pull_assets.sh
 
 If credentials are not already available in the environment, configure them first.
 
-## 7. Suggested workflow
+## 7. Push trained checkpoints
+
+After a task finishes training, push the task output directory to the same GCS
+DVC remote:
+
+```bash
+bash scripts/dvc/push_checkpoint.sh outputs/ucit_consensus/Task1_llava_lora_ours
+```
+
+For a specific remote name:
+
+```bash
+bash scripts/dvc/push_checkpoint.sh outputs/ucit_consensus/Task1_llava_lora_ours gcs
+```
+
+The script runs:
+
+- `dvc add CHECKPOINT_DIR`
+- `git add CHECKPOINT_DIR.dvc .gitignore`
+- `dvc push`
+
+For the consensus method, the checkpoint should include:
+
+```text
+adapter_config.json
+adapter_model.bin
+non_lora_trainables.bin
+consensus_subspaces.pt
+consensus_summary.json
+```
+
+Commit the generated `.dvc` metadata after pushing, for example:
+
+```bash
+git add outputs/ucit_consensus/Task1_llava_lora_ours.dvc .gitignore
+git commit -m "track task1 consensus checkpoint with DVC"
+```
+
+To pull the checkpoint on another machine, commit/pull the `.dvc` file first,
+then run:
+
+```bash
+dvc pull outputs/ucit_consensus/Task1_llava_lora_ours.dvc
+```
+
+## 8. Suggested workflow
 
 ### Local machine
 
@@ -111,20 +157,31 @@ bash scripts/dvc/pull_assets.sh
 
 Then run the project checks or training commands as usual.
 
-## 8. What gets committed
+### After each training task
+
+```bash
+bash scripts/dvc/push_checkpoint.sh outputs/ucit_consensus/Task1_llava_lora_ours
+git commit -m "track task1 consensus checkpoint with DVC"
+```
+
+Repeat with `Task2_llava_lora_ours`, `Task3_llava_lora_ours`, and so on.
+
+## 9. What gets committed
 
 Commit:
 
 - `.dvc/config`
 - `hide-llava-assets.dvc`
+- `outputs/.../Task*_llava_lora_ours.dvc`
 - `.gitignore`
 
 Keep local-only:
 
 - `.dvc/config.local`
 - actual contents of `hide-llava-assets/`
+- actual contents of `outputs/.../Task*_llava_lora_ours/`
 
-## 9. Notes
+## 10. Notes
 
 - As of July 23, 2026, the standard DVC flow for GCS is to install `dvc[gs]`, add a `gs://...` remote, and configure auth either through `gcloud auth application-default login` or a service-account credential path in local config, based on DVC’s official guidance.
 - `hide-llava-assets/` can be large, so the first `dvc push` may take a while.
