@@ -74,6 +74,7 @@ class ModelArguments:
     consensus_rank: int = field(default=32)
     consensus_rank_shared: int = field(default=32)
     consensus_eta: float = field(default=0.5)
+    consensus_normalize_fusion: bool = field(default=True)
     consensus_sample_limit: int = field(default=128)
     consensus_samples_per_forward: int = field(default=4)
     consensus_oversample: int = field(default=8)
@@ -173,6 +174,29 @@ def get_peft_state_non_lora_maybe_zero_3(named_params, require_grad_only=True):
         to_return = {k: t for k, t in to_return.items() if t.requires_grad}
     to_return = {k: maybe_zero_3(v, ignore_status=True).cpu() for k, v in to_return.items()}
     return to_return
+
+
+def assert_finite_checkpoint_state(state, state_name):
+    non_finite = []
+
+    def inspect(value, path):
+        if torch.is_tensor(value):
+            if (value.is_floating_point() or value.is_complex()) and not torch.isfinite(value).all():
+                non_finite.append(path)
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                inspect(child, f"{path}.{key}" if path else str(key))
+        elif isinstance(value, (list, tuple)):
+            for index, child in enumerate(value):
+                inspect(child, f"{path}[{index}]")
+
+    inspect(state, "")
+    if non_finite:
+        preview = ", ".join(non_finite[:10])
+        raise FloatingPointError(
+            f"Refusing to save {state_name}: {len(non_finite)} tensor(s) "
+            f"contain NaN/Inf ({preview})."
+        )
 
 
 def get_mm_adapter_state_maybe_zero_3(named_params, keys_to_match):
@@ -780,7 +804,12 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,
                 eval_dataset=None,
                 data_collator=data_collator)
 
-def load_model_from_previous_task(model, previous_task_model_path):
+def load_model_from_previous_task(
+    model,
+    previous_task_model_path,
+    require_consensus=False,
+    expected_task_count=None,
+):
     token_num, tokem_dim = model.lm_head.out_features, model.lm_head.in_features
     # if model.lm_head.weight.shape[0] != token_num:
     #     model.lm_head.weight = torch.nn.Parameter(torch.empty(token_num, tokem_dim, device=model.device, dtype=model.dtype))
@@ -799,6 +828,9 @@ def load_model_from_previous_task(model, previous_task_model_path):
                 subfolder=subfolder)
             return torch.load(cache_file, map_location='cpu')
         non_lora_trainables = load_from_hf(previous_task_model_path, 'non_lora_trainables.bin')
+    assert_finite_checkpoint_state(
+        non_lora_trainables, f"previous non-LoRA checkpoint {previous_task_model_path}"
+    )
     non_lora_trainables = {(k[11:] if k.startswith('base_model.') else k): v for k, v in non_lora_trainables.items()}
     if any(k.startswith('model.model.') for k in non_lora_trainables):
         non_lora_trainables = {(k[6:] if k.startswith('model.') else k): v for k, v in non_lora_trainables.items()}
@@ -813,8 +845,30 @@ def load_model_from_previous_task(model, previous_task_model_path):
     consensus_path = os.path.join(previous_task_model_path, "consensus_subspaces.pt")
     if os.path.exists(consensus_path):
         consensus_state = torch.load(consensus_path, map_location="cpu")
+        assert_finite_checkpoint_state(
+            consensus_state, f"previous consensus checkpoint {consensus_path}"
+        )
+        if expected_task_count is not None:
+            invalid_counts = {
+                name: len(module_state.get("task_bases", []))
+                for name, module_state in consensus_state.items()
+                if len(module_state.get("task_bases", [])) != expected_task_count
+            }
+            if invalid_counts:
+                preview = ", ".join(
+                    f"{name}={count}"
+                    for name, count in list(invalid_counts.items())[:5]
+                )
+                raise ValueError(
+                    f"Consensus checkpoint must contain {expected_task_count} "
+                    f"completed task basis/bases per module ({preview})."
+                )
         model.load_consensus_state(consensus_state)
         print(f"Loaded consensus subspaces from {consensus_path}")
+    elif require_consensus:
+        raise FileNotFoundError(
+            f"Consensus training requires previous state: {consensus_path}"
+        )
     print('Model is loaded...')
 
 def train():
@@ -906,6 +960,7 @@ def train():
                 "consensus_rank": model_args.consensus_rank,
                 "consensus_rank_shared": model_args.consensus_rank_shared,
                 "consensus_eta": model_args.consensus_eta,
+                "consensus_normalize_fusion": model_args.consensus_normalize_fusion,
                 "consensus_sample_limit": model_args.consensus_sample_limit,
                 "consensus_samples_per_forward": model_args.consensus_samples_per_forward,
                 "consensus_oversample": model_args.consensus_oversample,
@@ -1029,7 +1084,14 @@ def train():
 
     if model_args.previous_task_model_path is not None:
         # load model from previous task
-        load_model_from_previous_task(model, model_args.previous_task_model_path)
+        load_model_from_previous_task(
+            model,
+            model_args.previous_task_model_path,
+            require_consensus=model_args.consensus_enable,
+            expected_task_count=(
+                model_args.cur_task if model_args.consensus_enable else None
+            ),
+        )
 
     data_module = make_supervised_data_module(tokenizer=tokenizer,
                                               data_args=data_args)
@@ -1057,13 +1119,21 @@ def train():
         non_lora_state_dict = get_peft_state_non_lora_maybe_zero_3(
             model.named_parameters()
         )
+        assert_finite_checkpoint_state(state_dict, "LoRA checkpoint")
+        assert_finite_checkpoint_state(
+            non_lora_state_dict, "non-LoRA checkpoint"
+        )
         if training_args.local_rank == 0 or training_args.local_rank == -1:
             model.config.save_pretrained(training_args.output_dir)
             model.save_pretrained(training_args.output_dir, state_dict=state_dict)
             torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, 'non_lora_trainables.bin'))
             if model_args.consensus_enable:
+                consensus_state = model.export_consensus_state()
+                assert_finite_checkpoint_state(
+                    consensus_state, "consensus checkpoint"
+                )
                 torch.save(
-                    model.export_consensus_state(),
+                    consensus_state,
                     os.path.join(training_args.output_dir, "consensus_subspaces.pt"),
                 )
                 with open(

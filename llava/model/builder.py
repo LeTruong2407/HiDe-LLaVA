@@ -173,20 +173,28 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
             model.resize_token_embeddings(len(tokenizer))
         if load_4bit and device == "cuda":
             output_embeddings = model.get_output_embeddings()
-            if (
-                output_embeddings is not None
-                and not hasattr(output_embeddings.weight, "quant_state")
-            ):
+            if output_embeddings is not None and not hasattr(output_embeddings.weight, "quant_state"):
                 fp16_lm_head = torch.nn.Linear(
                     output_embeddings.in_features,
                     output_embeddings.out_features,
-                    bias=output_embeddings.bias is not None,
-                    device=output_embeddings.weight.device,
-                    dtype=output_embeddings.weight.dtype,
+                    bias=False,
+                    device=device,
+                    dtype=torch.float16,
                 )
-                fp16_lm_head.weight.data.copy_(output_embeddings.weight.data)
-                if output_embeddings.bias is not None:
-                    fp16_lm_head.bias.data.copy_(output_embeddings.bias.data)
+                index_path = os.path.join(model_base, "pytorch_model.bin.index.json")
+                if os.path.exists(index_path):
+                    import json
+                    with open(index_path, "r") as handle:
+                        weight_map = json.load(handle)["weight_map"]
+                    shard_name = weight_map.get("lm_head.weight")
+                    if shard_name is not None:
+                        shard = torch.load(os.path.join(model_base, shard_name), map_location="cpu")
+                        fp16_lm_head.weight.data.copy_(shard["lm_head.weight"].to(device=device, dtype=torch.float16))
+                        del shard
+                    else:
+                        warnings.warn("lm_head.weight was not found in the base model index; 4-bit eval may produce invalid logits.")
+                else:
+                    warnings.warn("Base model shard index was not found; 4-bit eval may produce invalid logits.")
                 model.set_output_embeddings(fp16_lm_head)
 
         vision_tower = model.get_vision_tower()

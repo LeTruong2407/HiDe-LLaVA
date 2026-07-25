@@ -179,41 +179,70 @@ class LlavaMetaForCausalLM(ABC):
         text_guide_features = text_tower(clip_text_inputs)
 
         if self.training:
-
-            current_image_features = image_guide_features  # [batch_size, feature_dim]
-            current_text_features = text_guide_features  # [batch_size, feature_dim]
             task_id = self.cur_task
+            with torch.no_grad():
+                # Keep running statistics in FP32 and outside autograd.
+                for features, anchors, boundaries in (
+                    (image_guide_features, self.image_anchors, self.image_boundary),
+                    (text_guide_features, self.text_anchors, self.text_boundary),
+                ):
+                    rows = features.detach().reshape(-1, features.shape[-1]).float()
+                    rows = rows[torch.isfinite(rows).all(dim=1)]
+                    if rows.numel() == 0:
+                        continue
 
-            image_sum = self.image_anchors[task_id] * self.image_boundary[task_id] + current_image_features.sum(dim=0)
-            text_sum = self.text_anchors[task_id] * self.text_boundary[task_id] + current_text_features.sum(dim=0)
+                    old_count = boundaries[task_id].detach().float()
+                    old_anchor = anchors[task_id].detach().float()
+                    new_count = old_count + rows.shape[0]
+                    new_anchor = (
+                        old_anchor * old_count + rows.sum(dim=0, keepdim=True)
+                    ) / new_count.clamp_min(1.0)
 
-            self.image_boundary[task_id].data += current_image_features.shape[0]
-            self.text_boundary[task_id].data += current_text_features.shape[0]
-
-            self.image_anchors[task_id] = image_sum / self.image_boundary[task_id]
-            self.text_anchors[task_id] = text_sum / self.text_boundary[task_id]
+                    anchors[task_id].copy_(new_anchor.to(
+                        device=anchors[task_id].device,
+                        dtype=anchors[task_id].dtype,
+                    ))
+                    boundaries[task_id].copy_(new_count.to(
+                        device=boundaries[task_id].device,
+                        dtype=boundaries[task_id].dtype,
+                    ))
         else:
-            image_sim = []
-            text_sim = []
-            for image_anchor in self.image_anchors:
-                image_sims = F.cosine_similarity(image_guide_features.unsqueeze(1), image_anchor, dim=2)
-                image_sim.append(image_sims.max().item())
-            for text_anchor in self.text_anchors:
-                text_sims = F.cosine_similarity(text_guide_features.unsqueeze(1), text_anchor, dim=2)
-                text_sim.append(text_sims.max().item())
+            learned_experts = min(self.cur_task + 1, self.expert_num)
+            force_expert_id = getattr(self, "force_expert_id", None)
+            if force_expert_id is not None:
+                compute_expert_weight = [0.0 for _ in range(self.expert_num)]
+                if 0 <= force_expert_id < learned_experts:
+                    compute_expert_weight[force_expert_id] = 1.0
+                else:
+                    raise ValueError(
+                        f"Invalid force_expert_id={force_expert_id}; "
+                        f"only {learned_experts} expert(s) have been trained"
+                    )
+            else:
+                image_sim = []
+                text_sim = []
+                for image_anchor in self.image_anchors[:learned_experts]:
+                    image_sims = F.cosine_similarity(image_guide_features.unsqueeze(1), image_anchor, dim=2)
+                    image_sim.append(image_sims.max().item())
+                for text_anchor in self.text_anchors[:learned_experts]:
+                    text_sims = F.cosine_similarity(text_guide_features.unsqueeze(1), text_anchor, dim=2)
+                    text_sim.append(text_sims.max().item())
 
-            image_sim = np.array(image_sim[:self.expert_num]) 
-            text_sim = np.array(text_sim[:self.expert_num])  
+                image_sim = np.array(image_sim)
+                text_sim = np.array(text_sim)
 
-            sim = (image_sim + text_sim) / 2
+                sim = (image_sim + text_sim) / 2
 
-            sim_tensor = torch.tensor(sim, dtype=torch.float32)
+                sim_tensor = torch.nan_to_num(torch.tensor(sim, dtype=torch.float32), nan=-1e4, posinf=1e4, neginf=-1e4)
 
-            sim_softmax = F.softmax(sim_tensor / 0.1)
+                sim_softmax = F.softmax(sim_tensor / 0.1, dim=0)
 
-            # compute_expert_weight = torch.sigmoid(shifted_conf).tolist()
-            compute_expert_weight = sim_softmax.tolist()
-            # print(compute_expert_weight)
+                # compute_expert_weight = torch.sigmoid(shifted_conf).tolist()
+                compute_expert_weight = sim_softmax.tolist()
+                compute_expert_weight.extend(
+                    [0.0] * (self.expert_num - learned_experts)
+                )
+                # print(compute_expert_weight)
 
             proj_names = [
                 'q_proj', 'k_proj', 'v_proj', 'o_proj',  # self_attn 

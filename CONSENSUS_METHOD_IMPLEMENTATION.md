@@ -19,7 +19,8 @@ Inference computes
 x_filtered = eta * x + (1 - eta) * U_c (U_c^T x)
 ```
 
-and applies each learned lower-layer LoRA expert to `x_filtered`. The final
+and applies the uniform average of all learned lower-layer LoRA updates to
+`x_filtered`. The final
 decoder layer remains the original HiDe sample-dependent mixture based on CLIP
 image/text anchors.
 
@@ -49,19 +50,20 @@ proposal. Consensus mode instead computes the mathematically intended sum of
 baseline, but it is not bit-for-bit equivalent to the repository's cross-term
 behavior.
 
-### No division by the task count
+### Uniform fusion coefficients
 
-The repository uses an unnormalized lower-layer sum, while the proposal writes
-an average. Consensus mode preserves the repository's update scale and does not
-divide by the learned task count. A normalized-average ablation can be added
-after confirming the baseline scale used by the released checkpoints.
+The repository has no implementation of HiDe's learned fusion coefficients; its
+lower-layer code hardcodes a weight of one. Consensus mode implements the
+proposal's explicit uniform rule and divides the fused update by the number of
+learned tasks. Set `--consensus_normalize_fusion False` only to reproduce the
+old repository's unnormalized scale as an ablation.
 
 ### Bounded sampling for Kaggle
 
 Keeping full token activation matrices for roughly 217 projections is not
-practical on 2x16GB Kaggle sessions. Each projection samples randomized token
-rows into a bounded CPU buffer until that buffer is full. The Kaggle launcher
-defaults to 64 rows and two sampled tokens per forward.
+practical on 2x16GB Kaggle sessions. Each projection uses reservoir sampling to
+maintain a bounded CPU sample representative of the full task stream. The
+Kaggle launcher defaults to 64 rows and two candidate tokens per forward.
 This is deliberately conservative; 128 or 256 rows should improve subspace
 estimation when host RAM permits.
 
@@ -88,6 +90,7 @@ has not been implemented. Dense 16-bit and 4-bit paths are supported.
 - `--consensus_rank`: rank retained for each task activation subspace.
 - `--consensus_rank_shared`: rank of the consensus subspace.
 - `--consensus_eta`: complementary-subspace weight in `[0, 1]`.
+- `--consensus_normalize_fusion`: use the proposal's `1/T` uniform average.
 - `--consensus_sample_limit`: maximum sampled activation rows per projection.
 - `--consensus_samples_per_forward`: sampled rows per projection and forward.
 - `--consensus_oversample`: randomized PCA oversampling rank.
@@ -104,7 +107,7 @@ Start the full low-memory UCIT schedule with:
 bash scripts/HiDe/Train_UCIT/run_all_consensus_kaggle_2x16gb.sh
 ```
 
-For the proposal's required pilot, run only `Task1.sh` through `Task3.sh` with
+For the proposal's required pilot, use the consensus Task 1 through Task 3 launchers with
 the same environment variables and inspect `consensus_summary.json`. The
 `previous_task_overlap` values are mean cosines of principal angles between the
 new task basis and the immediately preceding task basis. Compute all pairwise

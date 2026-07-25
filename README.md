@@ -217,3 +217,7 @@ Full guide:
 ## Acknowledgememnt
 
 This repository is built upon the [LLaVA](https://github.com/haotian-liu/LLaVA) and [CoIN](https://github.com/zackschen/CoIN) projects. We sincerely thank the authors for their valuable contributions to the research community.
+
+## Consensus-aware method
+
+- [Consensus method audit](CONSENSUS_METHOD_AUDIT.md)

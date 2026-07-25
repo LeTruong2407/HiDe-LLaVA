@@ -70,6 +70,7 @@ The launcher uses:
 - consensus rank `32`;
 - shared consensus rank `32`;
 - complementary-subspace weight `eta = 0.5`;
+- proposal-faithful uniform `1/T` lower-layer fusion;
 - at most 64 sampled activation rows per projection.
 
 The settings are defined once in:
@@ -129,11 +130,11 @@ source scripts/HiDe/Train_UCIT/kaggle_consensus_2x16gb_env.sh
 Then run the remaining tasks:
 
 ```bash
-bash scripts/HiDe/Train_UCIT/Task2.sh
-bash scripts/HiDe/Train_UCIT/Task3.sh
-bash scripts/HiDe/Train_UCIT/Task4.sh
-bash scripts/HiDe/Train_UCIT/Task5.sh
-bash scripts/HiDe/Train_UCIT/Task6.sh
+bash scripts/HiDe/Train_UCIT/run_task2_consensus_kaggle_2x16gb.sh
+bash scripts/HiDe/Train_UCIT/run_task3_consensus_kaggle_2x16gb.sh
+bash scripts/HiDe/Train_UCIT/run_task4_consensus_kaggle_2x16gb.sh
+bash scripts/HiDe/Train_UCIT/run_task5_consensus_kaggle_2x16gb.sh
+bash scripts/HiDe/Train_UCIT/run_task6_consensus_kaggle_2x16gb.sh
 ```
 
 The required order is:
@@ -255,4 +256,8 @@ base LLaVA
 ```
 
 The persistent consensus state is stored in `consensus_subspaces.pt` beside
-each task adapter and is loaded automatically by the next task.
+each task adapter and is loaded automatically by the next task. The explicit
+consensus launchers verify this file before starting Task 2 through Task 6.
+
+For the proposal-to-code fidelity review and the limitations that remain, read
+`CONSENSUS_METHOD_AUDIT.md`.

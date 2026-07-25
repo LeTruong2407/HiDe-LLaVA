@@ -81,12 +81,16 @@ def eval_model(args):
         load_4bit=args.load_4bit,
         text_tower=args.text_tower,
     )
+    if args.force_expert is not None:
+        for obj in (model, getattr(model, "base_model", None), getattr(getattr(model, "base_model", None), "model", None)):
+            if obj is not None:
+                setattr(obj, "force_expert_id", args.force_expert)
 
     with open(os.path.expanduser(args.question_file), "r") as f:
         questions = json.load(f)
-    questions = get_chunk(questions, args.num_chunks, args.chunk_idx)
     if args.max_samples is not None:
         questions = questions[:args.max_samples]
+    questions = get_chunk(questions, args.num_chunks, args.chunk_idx)
     answers_file = os.path.expanduser(args.answers_file)
     os.makedirs(os.path.dirname(answers_file), exist_ok=True)
     ans_file = open(answers_file, "w")
@@ -112,6 +116,7 @@ def eval_model(args):
                 top_p=args.top_p,
                 num_beams=args.num_beams,
                 max_new_tokens=args.max_new_tokens,
+                min_new_tokens=args.min_new_tokens,
                 use_cache=args.use_cache)
 
         input_token_len = input_ids.shape[1]
@@ -146,11 +151,13 @@ if __name__ == "__main__":
     parser.add_argument("--top_p", type=float, default=None)
     parser.add_argument("--num_beams", type=int, default=1)
     parser.add_argument("--max_new_tokens", type=int, default=128)
+    parser.add_argument("--min-new-tokens", type=int, default=0)
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--text-tower", type=str)
     parser.add_argument("--load-8bit", action="store_true")
     parser.add_argument("--load-4bit", action="store_true")
     parser.add_argument("--use-cache", action="store_true")
+    parser.add_argument("--force-expert", type=int, default=None)
     args = parser.parse_args()
 
     eval_model(args)

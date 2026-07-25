@@ -56,6 +56,7 @@ class HiDeMOELoraConfig(LoraConfig):
     consensus_rank: int = field(default=32)
     consensus_rank_shared: int = field(default=32)
     consensus_eta: float = field(default=0.5)
+    consensus_normalize_fusion: bool = field(default=True)
     consensus_sample_limit: int = field(default=128)
     consensus_samples_per_forward: int = field(default=4)
     consensus_oversample: int = field(default=8)
@@ -199,6 +200,7 @@ class HiDeMOELoraModel(LoraModel):
             "consensus_rank": lora_config.consensus_rank,
             "consensus_rank_shared": lora_config.consensus_rank_shared,
             "consensus_eta": lora_config.consensus_eta,
+            "consensus_normalize_fusion": lora_config.consensus_normalize_fusion,
             "consensus_sample_limit": lora_config.consensus_sample_limit,
             "consensus_samples_per_forward": lora_config.consensus_samples_per_forward,
             "consensus_oversample": lora_config.consensus_oversample,
@@ -399,6 +401,7 @@ class HiDeMOELoraLinear(nn.Linear, HiDeMOELoraLayer):
         self.consensus_rank = kwargs.pop("consensus_rank", 32)
         self.consensus_rank_shared = kwargs.pop("consensus_rank_shared", 32)
         self.consensus_eta = kwargs.pop("consensus_eta", 0.5)
+        self.consensus_normalize_fusion = kwargs.pop("consensus_normalize_fusion", True)
         self.consensus_sample_limit = kwargs.pop("consensus_sample_limit", 128)
         self.consensus_samples_per_forward = kwargs.pop("consensus_samples_per_forward", 4)
         self.consensus_oversample = kwargs.pop("consensus_oversample", 8)
@@ -439,9 +442,6 @@ class HiDeMOELoraLinear(nn.Linear, HiDeMOELoraLayer):
     def _collect_consensus_activations(self, x):
         if not self._consensus_collect or self.consensus_sample_limit <= 0:
             return
-        if len(self._consensus_samples) >= self.consensus_sample_limit:
-            return
-
         with torch.no_grad():
             rows = x.detach().reshape(-1, x.shape[-1])
             take = min(self.consensus_samples_per_forward, rows.shape[0])
@@ -451,10 +451,17 @@ class HiDeMOELoraLinear(nn.Linear, HiDeMOELoraLayer):
             sampled = rows.index_select(0, indices).float().cpu()
 
             for row in sampled:
-                if len(self._consensus_samples) >= self.consensus_sample_limit:
-                    break
+                if not torch.isfinite(row).all():
+                    continue
                 self._consensus_seen += 1
-                self._consensus_samples.append(row)
+                if len(self._consensus_samples) < self.consensus_sample_limit:
+                    self._consensus_samples.append(row)
+                    continue
+                replacement = torch.randint(
+                    0, self._consensus_seen, (1,)
+                ).item()
+                if replacement < self.consensus_sample_limit:
+                    self._consensus_samples[replacement] = row
 
     def finalize_consensus_task(self):
         if not self.consensus_enable or int(self.layer) == 31:
@@ -464,6 +471,10 @@ class HiDeMOELoraLinear(nn.Linear, HiDeMOELoraLayer):
             return None
 
         activations = torch.stack(self._consensus_samples, dim=0)
+        if not torch.isfinite(activations).all():
+            raise FloatingPointError(
+                f"Non-finite consensus activations in layer {self.layer}"
+            )
         max_rank = min(activations.shape[0], activations.shape[1])
         q = min(self.consensus_rank + self.consensus_oversample, max_rank)
         if q <= 0:
@@ -488,14 +499,16 @@ class HiDeMOELoraLinear(nn.Linear, HiDeMOELoraLayer):
         )
         self._consensus_basis = consensus[:, :shared_rank].half().cpu().contiguous()
         self._consensus_basis_runtime = None
+        candidates_seen = self._consensus_seen
         self._consensus_samples = []
         self._consensus_seen = 0
         self._consensus_collect = False
 
         retained = singular_values[:rank].square().sum()
-        total = singular_values.square().sum().clamp_min(1e-12)
+        total = activations.square().sum().clamp_min(1e-12)
         return {
             "samples": int(activations.shape[0]),
+            "candidates_seen": int(candidates_seen),
             "rank": int(rank),
             "captured_energy": float((retained / total).item()),
             "previous_task_overlap": overlap,
@@ -592,8 +605,12 @@ class HiDeMOELoraLinear(nn.Linear, HiDeMOELoraLayer):
                         filtered = self._consensus_filter(x)
                         filtered = self.lora_dropout[self.active_adapter](filtered)
                         learned_experts = min(self.cur_task + 1, self.expert_num)
+                        fusion_scale = (
+                            1.0 / learned_experts
+                            if self.consensus_normalize_fusion else 1.0
+                        )
                         for i in range(learned_experts):
-                            result += (
+                            result += fusion_scale * (
                                 self.lora_B[self.active_adapter].loraB[i](
                                     self.lora_A[self.active_adapter].loraA[i](filtered)
                                 )
@@ -649,6 +666,7 @@ if is_bnb_4bit_available():
             self.consensus_rank = kwargs.pop("consensus_rank", 32)
             self.consensus_rank_shared = kwargs.pop("consensus_rank_shared", 32)
             self.consensus_eta = kwargs.pop("consensus_eta", 0.5)
+            self.consensus_normalize_fusion = kwargs.pop("consensus_normalize_fusion", True)
             self.consensus_sample_limit = kwargs.pop("consensus_sample_limit", 128)
             self.consensus_samples_per_forward = kwargs.pop("consensus_samples_per_forward", 4)
             self.consensus_oversample = kwargs.pop("consensus_oversample", 8)
@@ -693,11 +711,20 @@ if is_bnb_4bit_available():
             elif int(self.layer) != 31:
                 filtered = self._consensus_filter(adapter_input)
                 filtered = self.lora_dropout[self.active_adapter](filtered)
-                for i in range(min(self.cur_task + 1, self.expert_num)):
+                learned_experts = min(self.cur_task + 1, self.expert_num)
+                fusion_scale = (
+                    1.0 / learned_experts
+                    if self.consensus_normalize_fusion else 1.0
+                )
+                for i in range(learned_experts):
                     update = self.lora_B[self.active_adapter].loraB[i](
                         self.lora_A[self.active_adapter].loraA[i](filtered)
                     )
-                    result += update.to(expected_dtype) * self.scaling[self.active_adapter]
+                    result += (
+                        update.to(expected_dtype)
+                        * self.scaling[self.active_adapter]
+                        * fusion_scale
+                    )
             else:
                 for i, weight in enumerate(self.expert_weight):
                     update = self.lora_B[self.active_adapter].loraB[i](

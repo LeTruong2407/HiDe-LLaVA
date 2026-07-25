@@ -1,6 +1,10 @@
 #!/bin/bash
 
 # Shared consensus-aware HiDe settings for Kaggle 2x T4 16GB.
+if [ "${CONSENSUS_ENV_CONFIGURED:-0}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+export CONSENSUS_ENV_CONFIGURED=1
 CONSENSUS_SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONSENSUS_REPO_ROOT="$(cd -- "$CONSENSUS_SCRIPT_DIR/../../.." && pwd)"
 
@@ -21,6 +25,7 @@ export UCIT_OUTPUT_ROOT="${UCIT_OUTPUT_ROOT:-$CONSENSUS_REPO_ROOT/outputs/ucit_c
 export CONSENSUS_RANK="${CONSENSUS_RANK:-32}"
 export CONSENSUS_RANK_SHARED="${CONSENSUS_RANK_SHARED:-32}"
 export CONSENSUS_ETA="${CONSENSUS_ETA:-0.5}"
+export CONSENSUS_NORMALIZE_FUSION="${CONSENSUS_NORMALIZE_FUSION:-True}"
 export CONSENSUS_SAMPLE_LIMIT="${CONSENSUS_SAMPLE_LIMIT:-64}"
 export CONSENSUS_SAMPLES_PER_FORWARD="${CONSENSUS_SAMPLES_PER_FORWARD:-2}"
 export CONSENSUS_OVERSAMPLE="${CONSENSUS_OVERSAMPLE:-8}"
@@ -33,6 +38,7 @@ CONSENSUS_EXTRA_ARGS=(
   --consensus_rank "$CONSENSUS_RANK"
   --consensus_rank_shared "$CONSENSUS_RANK_SHARED"
   --consensus_eta "$CONSENSUS_ETA"
+  --consensus_normalize_fusion "$CONSENSUS_NORMALIZE_FUSION"
   --consensus_sample_limit "$CONSENSUS_SAMPLE_LIMIT"
   --consensus_samples_per_forward "$CONSENSUS_SAMPLES_PER_FORWARD"
   --consensus_oversample "$CONSENSUS_OVERSAMPLE"

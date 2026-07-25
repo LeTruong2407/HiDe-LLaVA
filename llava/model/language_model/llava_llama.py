@@ -56,18 +56,18 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
 
         # Initialize anchors
         self.image_anchors = nn.ParameterList(
-            [nn.Parameter(0.1 * torch.randn(1, 768)) for _ in range(10)]
+            [nn.Parameter(0.1 * torch.randn(1, 768), requires_grad=False) for _ in range(10)]
         )
 
         self.text_anchors = nn.ParameterList(
-            [nn.Parameter(0.1 * torch.randn(1, 768)) for _ in range(10)]
+            [nn.Parameter(0.1 * torch.randn(1, 768), requires_grad=False) for _ in range(10)]
         )
 
         self.image_boundary = nn.ParameterList(
-            [nn.Parameter(torch.ones(1, dtype=torch.bfloat16)) for _ in range(10)]
+            [nn.Parameter(torch.ones(1, dtype=torch.float32), requires_grad=False) for _ in range(10)]
             )
         self.text_boundary = nn.ParameterList(
-            [nn.Parameter(torch.ones(1, dtype=torch.bfloat16)) for _ in range(10)]
+            [nn.Parameter(torch.ones(1, dtype=torch.float32), requires_grad=False) for _ in range(10)]
             )
 
         self.expert_weight = [0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]
@@ -76,11 +76,16 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         self.cur_task = cur_task
         self.expert_num = expert_num
 
-        for name, param in self.image_anchors.named_parameters():
-            param.requires_grad = True
-        
-        for name, param in self.text_anchors.named_parameters():
-            param.requires_grad = True
+        # Anchors are running statistics, not optimizer parameters. Updating them
+        # both manually and through gradients makes them numerically unstable.
+        for param in self.image_anchors.parameters():
+            param.requires_grad = False
+        for param in self.text_anchors.parameters():
+            param.requires_grad = False
+        for param in self.image_boundary.parameters():
+            param.requires_grad = False
+        for param in self.text_boundary.parameters():
+            param.requires_grad = False
 
     def set_boundary_for_save(self):
         for name, param in self.image_boundary.named_parameters():
