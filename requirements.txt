@@ -26,7 +26,7 @@ openpyxl==3.1.5
 pandas==2.2.2
 peft==0.4.0
 Pillow>=10,<13
-protobuf<6
+protobuf>=4.25,<5
 psutil==6.0.0
 pycocoevalcap==1.2
 pycocotools==2.0.8

@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../HiDe/paths.sh"
+DOWNLOAD_SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$DOWNLOAD_SCRIPT_DIR/../HiDe/paths.sh"
 
 need_cmd() {
   local cmd="$1"
@@ -56,13 +56,13 @@ maybe_download_iconqa() {
 
   if [ -z "${ICONQA_ARCHIVE_URL:-}" ]; then
     echo "[WARN] Skipping IconQA images: ICONQA_ARCHIVE_URL is not set."
-    echo "       Get the current archive URL from https://iconqa.github.io/ and rerun with:"
-    echo "       ICONQA_ARCHIVE_URL='https://.../iconqa_data.zip' bash scripts/download/setup_all_ucit_assets.sh"
-    return
+  echo "       Get the current archive URL from https://iconqa.github.io/ and rerun with:"
+  echo "       ICONQA_ARCHIVE_URL='https://.../iconqa_data.zip' bash scripts/download/setup_all_ucit_assets.sh"
+  return
   fi
 
   echo "[RUN ] Downloading IconQA"
-  bash "$SCRIPT_DIR/download_iconqa.sh"
+  bash "$DOWNLOAD_SCRIPT_DIR/download_iconqa.sh"
 }
 
 maybe_download_vizwiz() {
@@ -79,7 +79,7 @@ maybe_download_vizwiz() {
   fi
 
   echo "[RUN ] Downloading VizWiz"
-  bash "$SCRIPT_DIR/download_vizwiz.sh"
+  bash "$DOWNLOAD_SCRIPT_DIR/download_vizwiz.sh"
 }
 
 need_cmd huggingface-cli
@@ -88,18 +88,18 @@ mkdir -p "$HIDE_ASSETS_ROOT" "$DATA_ROOT" "$INSTRUCTION_ROOT"
 echo "Assets root: $HIDE_ASSETS_ROOT"
 echo
 
-run_or_skip_dir "LLaVA base model" "$LLAVA_BASE_MODEL" bash "$SCRIPT_DIR/download_models.sh"
-run_or_skip_dir "CLIP model" "$CLIP_MODEL" bash "$SCRIPT_DIR/download_models.sh"
+run_or_skip_dir "LLaVA base model" "$LLAVA_BASE_MODEL" bash "$DOWNLOAD_SCRIPT_DIR/download_models.sh"
+run_or_skip_dir "CLIP model" "$CLIP_MODEL" bash "$DOWNLOAD_SCRIPT_DIR/download_models.sh"
 
 echo "[RUN ] Downloading/copying UCIT instruction files and HF-hosted image data"
-bash "$SCRIPT_DIR/download_ucit_hf.sh" all
+bash "$DOWNLOAD_SCRIPT_DIR/download_ucit_hf.sh" all
 extract_imagenet_r_if_needed
 
-run_or_skip_dir "ArxivQA images" "$DATA_ROOT/ArxivQA" bash "$SCRIPT_DIR/download_arxivqa.sh"
-run_or_skip_dir "CLEVR-Math images" "$DATA_ROOT/CLEVR" bash "$SCRIPT_DIR/download_clevr_math.sh"
+run_or_skip_dir "ArxivQA images" "$DATA_ROOT/ArxivQA" bash "$DOWNLOAD_SCRIPT_DIR/download_arxivqa.sh"
+run_or_skip_dir "CLEVR-Math images" "$DATA_ROOT/CLEVR" bash "$DOWNLOAD_SCRIPT_DIR/download_clevr_math.sh"
 maybe_download_iconqa
 maybe_download_vizwiz
 
 echo
 echo "[CHECK] Final asset status"
-bash "$SCRIPT_DIR/check_assets.sh"
+bash "$DOWNLOAD_SCRIPT_DIR/check_assets.sh"
