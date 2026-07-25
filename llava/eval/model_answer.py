@@ -107,10 +107,37 @@ def eval_model(args):
 
         input_ids = input_ids.to(device='cuda', non_blocking=True)
 
+        image_tensor = image_tensor.to(
+            dtype=torch.float16, device='cuda', non_blocking=True
+        )
+        generation_debug = {}
         with torch.inference_mode():
+            if args.debug_generation:
+                first_output = model(
+                    input_ids=input_ids,
+                    images=image_tensor,
+                    use_cache=False,
+                )
+                first_logits = first_output.logits[:, -1, :].float()
+                finite_mask = torch.isfinite(first_logits)
+                safe_logits = torch.nan_to_num(
+                    first_logits, nan=-float("inf"),
+                    posinf=float("inf"), neginf=-float("inf")
+                )
+                top_values, top_ids = torch.topk(safe_logits, k=5, dim=-1)
+                generation_debug.update({
+                    "first_logits_finite": bool(finite_mask.all().item()),
+                    "first_logits_non_finite": int((~finite_mask).sum().item()),
+                    "first_top_token_ids": top_ids[0].cpu().tolist(),
+                    "first_top_token_scores": top_values[0].cpu().tolist(),
+                    "first_top_tokens": [
+                        tokenizer.decode([token_id], skip_special_tokens=False)
+                        for token_id in top_ids[0].cpu().tolist()
+                    ],
+                })
             output_ids = model.generate(
                 input_ids=input_ids,
-                images=image_tensor.to(dtype=torch.float16, device='cuda', non_blocking=True),
+                images=image_tensor,
                 do_sample=True if args.temperature > 0 else False,
                 temperature=args.temperature,
                 top_p=args.top_p,
@@ -123,8 +150,17 @@ def eval_model(args):
         n_diff_input_output = (input_ids != output_ids[:, :input_token_len]).sum().item()
         if n_diff_input_output > 0:
             print(f'[Warning] {n_diff_input_output} output_ids are not the same as the input_ids')
-        outputs = tokenizer.batch_decode(output_ids[:, input_token_len:], skip_special_tokens=True)[0]
-        outputs = outputs.strip()
+        generated_ids = output_ids[:, input_token_len:]
+        outputs = tokenizer.batch_decode(
+            generated_ids, skip_special_tokens=True
+        )[0].strip()
+        if args.debug_generation:
+            generation_debug.update({
+                "generated_token_ids": generated_ids[0].cpu().tolist(),
+                "generated_raw_text": tokenizer.decode(
+                    generated_ids[0], skip_special_tokens=False
+                ),
+            })
 
         ans_id = shortuuid.uuid()
         ans_file.write(json.dumps({"question_id": idx,
@@ -132,7 +168,7 @@ def eval_model(args):
                                    "text": outputs,
                                    "answer_id": ans_id,
                                    "model_id": model_name,
-                                   "metadata": {}}) + "\n")
+                                   "metadata": generation_debug}) + "\n")
         # ans_file.flush()
     ans_file.close()
 
@@ -158,6 +194,7 @@ if __name__ == "__main__":
     parser.add_argument("--load-4bit", action="store_true")
     parser.add_argument("--use-cache", action="store_true")
     parser.add_argument("--force-expert", type=int, default=None)
+    parser.add_argument("--debug-generation", action="store_true")
     args = parser.parse_args()
 
     eval_model(args)

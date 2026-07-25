@@ -9,6 +9,7 @@ EVAL_MIN_NEW_TOKENS="${EVAL_MIN_NEW_TOKENS:-0}"
 EVAL_QUANT_ARGS="${EVAL_QUANT_ARGS:---load-4bit}"
 EVAL_MAX_SAMPLES="${EVAL_MAX_SAMPLES:-}"
 EVAL_FORCE_EXPERT="${EVAL_FORCE_EXPERT:-}"
+EVAL_DEBUG_GENERATION="${EVAL_DEBUG_GENERATION:-0}"
 
 gpu_list="${EVAL_GPUS:-${CUDA_VISIBLE_DEVICES:-0}}"
 IFS=',' read -ra GPULIST <<< "$gpu_list"
@@ -39,6 +40,9 @@ if [ -n "$EVAL_MAX_SAMPLES" ]; then
 fi
 if [ -n "$EVAL_FORCE_EXPERT" ]; then
     EVAL_EXTRA_ARGS+=(--force-expert "$EVAL_FORCE_EXPERT")
+fi
+if [ "$EVAL_DEBUG_GENERATION" = "1" ]; then
+    EVAL_EXTRA_ARGS+=(--debug-generation)
 fi
 
 for IDX in $(seq 0 $((CHUNKS-1))); do
