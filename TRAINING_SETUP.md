@@ -461,3 +461,20 @@ If task 1 works, run:
 ```bash
 bash scripts/HiDe/Train_UCIT/train_all.sh
 ```
+
+cd /kaggle/working/HiDe-LLaVA
+python3 -m pip install -U pip
+python3 -m pip install -r requirements.txt
+python3 -m pip install -r requirements.gpu-linux.txt
+python3 -m pip install -e .
+
+bash scripts/download/setup_all_ucit_assets.sh
+
+bash scripts/download/download_models.sh
+bash scripts/download/download_ucit_hf.sh
+bash scripts/download/check_assets.sh
+
+tar -xzf hide-llava-assets/datasets/ImageNet-R/imagenetr.tar.gz \
+  -C hide-llava-assets/datasets/ImageNet-R
+
+bash scripts/HiDe/Train_UCIT/run_task1_kaggle_2x16gb.sh
