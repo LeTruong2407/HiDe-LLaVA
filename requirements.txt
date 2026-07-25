@@ -75,3 +75,5 @@ triton==2.0.0
 # depends on your exact CUDA, PyTorch, Python, and GPU toolchain combination.
 # Install it manually if needed, e.g.:
 #   pip install flash-attn --no-build-isolation
+
+dvc[gs]>=3.0,<4
