@@ -510,7 +510,7 @@ class HiDeMOELoraLinear(nn.Linear, HiDeMOELoraLayer):
             "samples": int(activations.shape[0]),
             "candidates_seen": int(candidates_seen),
             "rank": int(rank),
-            "captured_energy": float((retained / total).item()),
+            "captured_energy": float((retained / total).clamp(0.0, 1.0).item()),
             "previous_task_overlap": overlap,
         }
 

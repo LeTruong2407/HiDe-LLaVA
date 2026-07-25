@@ -30,6 +30,24 @@ class LlavaConfig(LlamaConfig):
     model_type = "llava"
 
 
+class RunningStatList(nn.Module):
+    """A buffer-backed list with ParameterList-compatible state-dict keys."""
+
+    def __init__(self, tensors):
+        super().__init__()
+        for index, tensor in enumerate(tensors):
+            self.register_buffer(str(index), tensor)
+
+    def __getitem__(self, index):
+        return self._buffers[str(index)]
+
+    def __iter__(self):
+        return iter(self._buffers.values())
+
+    def __len__(self):
+        return len(self._buffers)
+
+
 class LlavaLlamaModel(LlavaMetaModel, LlamaModel):
     config_class = LlavaConfig
 
@@ -55,20 +73,18 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         self.expert_num = 6
 
         # Initialize anchors
-        self.image_anchors = nn.ParameterList(
-            [nn.Parameter(0.1 * torch.randn(1, 768), requires_grad=False) for _ in range(10)]
+        self.image_anchors = RunningStatList(
+            [0.1 * torch.randn(1, 768) for _ in range(10)]
         )
-
-        self.text_anchors = nn.ParameterList(
-            [nn.Parameter(0.1 * torch.randn(1, 768), requires_grad=False) for _ in range(10)]
+        self.text_anchors = RunningStatList(
+            [0.1 * torch.randn(1, 768) for _ in range(10)]
         )
-
-        self.image_boundary = nn.ParameterList(
-            [nn.Parameter(torch.ones(1, dtype=torch.float32), requires_grad=False) for _ in range(10)]
-            )
-        self.text_boundary = nn.ParameterList(
-            [nn.Parameter(torch.ones(1, dtype=torch.float32), requires_grad=False) for _ in range(10)]
-            )
+        self.image_boundary = RunningStatList(
+            [torch.ones(1, dtype=torch.float32) for _ in range(10)]
+        )
+        self.text_boundary = RunningStatList(
+            [torch.ones(1, dtype=torch.float32) for _ in range(10)]
+        )
 
         self.expert_weight = [0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]
 

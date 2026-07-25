@@ -1128,6 +1128,17 @@ def train():
         non_lora_state_dict = get_peft_state_non_lora_maybe_zero_3(
             model.named_parameters()
         )
+        running_stat_markers = (
+            "image_anchors.",
+            "text_anchors.",
+            "image_boundary.",
+            "text_boundary.",
+        )
+        non_lora_state_dict.update({
+            name: value.detach().cpu().clone()
+            for name, value in model.named_buffers()
+            if any(marker in name for marker in running_stat_markers)
+        })
         assert_finite_checkpoint_state(state_dict, "LoRA checkpoint")
         assert_finite_checkpoint_state(
             non_lora_state_dict, "non-LoRA checkpoint"
