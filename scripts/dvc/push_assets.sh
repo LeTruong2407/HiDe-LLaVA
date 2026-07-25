@@ -1,25 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
-ASSET_PATH="${1:-hide-llava-assets}"
+cat <<EOF
+This project now uses DVC only for generated artifacts, not datasets/base models.
+Use scripts/download/*.sh for datasets and base models.
 
-if ! command -v dvc >/dev/null 2>&1; then
-  echo "dvc is not installed."
-  echo "Install it with:"
-  echo "  python -m pip install -r requirements.dvc.txt"
-  exit 1
-fi
+Use:
+  bash scripts/dvc/push_artifact.sh ARTIFACT_PATH
 
-if [ ! -e "$ASSET_PATH" ]; then
-  echo "Asset path not found: $ASSET_PATH"
-  exit 1
-fi
-
-dvc add "$ASSET_PATH"
-git add "${ASSET_PATH}.dvc" .gitignore
-dvc push
-
-echo
-echo "DVC push complete for: $ASSET_PATH"
-echo "Recommended next step:"
-echo "  git add .dvc/config ${ASSET_PATH}.dvc .gitignore"
+Examples:
+  bash scripts/dvc/push_artifact.sh outputs/ucit_consensus/Task1_llava_lora_ours
+  bash scripts/dvc/push_artifact.sh results/UCIT/each_dataset/ImageNet-R/consensus-task1
+EOF
+exit 1
