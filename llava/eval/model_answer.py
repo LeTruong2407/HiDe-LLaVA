@@ -73,11 +73,20 @@ def eval_model(args):
     disable_torch_init()
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(model_path)
-    tokenizer, model, image_processor, context_len = load_pretrained_model(model_path, args.model_base, model_name, text_tower=args.text_tower)
+    tokenizer, model, image_processor, context_len = load_pretrained_model(
+        model_path,
+        args.model_base,
+        model_name,
+        load_8bit=args.load_8bit,
+        load_4bit=args.load_4bit,
+        text_tower=args.text_tower,
+    )
 
     with open(os.path.expanduser(args.question_file), "r") as f:
         questions = json.load(f)
     questions = get_chunk(questions, args.num_chunks, args.chunk_idx)
+    if args.max_samples is not None:
+        questions = questions[:args.max_samples]
     answers_file = os.path.expanduser(args.answers_file)
     os.makedirs(os.path.dirname(answers_file), exist_ok=True)
     ans_file = open(answers_file, "w")
@@ -96,14 +105,14 @@ def eval_model(args):
 
         with torch.inference_mode():
             output_ids = model.generate(
-                input_ids,
+                input_ids=input_ids,
                 images=image_tensor.to(dtype=torch.float16, device='cuda', non_blocking=True),
                 do_sample=True if args.temperature > 0 else False,
                 temperature=args.temperature,
                 top_p=args.top_p,
                 num_beams=args.num_beams,
                 max_new_tokens=args.max_new_tokens,
-                use_cache=True)
+                use_cache=args.use_cache)
 
         input_token_len = input_ids.shape[1]
         n_diff_input_output = (input_ids != output_ids[:, :input_token_len]).sum().item()
@@ -137,7 +146,11 @@ if __name__ == "__main__":
     parser.add_argument("--top_p", type=float, default=None)
     parser.add_argument("--num_beams", type=int, default=1)
     parser.add_argument("--max_new_tokens", type=int, default=128)
+    parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--text-tower", type=str)
+    parser.add_argument("--load-8bit", action="store_true")
+    parser.add_argument("--load-4bit", action="store_true")
+    parser.add_argument("--use-cache", action="store_true")
     args = parser.parse_args()
 
     eval_model(args)

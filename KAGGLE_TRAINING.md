@@ -9,16 +9,19 @@ Inside Kaggle terminal or notebook shell:
 ```bash
 cd /kaggle/working/HiDe-LLaVA
 conda activate hide-llava || true
-python -m pip install -U pip
-python -m pip install -r requirements.txt
-python -m pip install -r requirements.gpu-linux.txt
-python -m pip install -e .
+python3 -m pip install -U pip
+python3 -m pip install -r requirements.txt
+python3 -m pip install -r requirements.gpu-linux.txt
+python3 -m pip install -e .
 ```
+
+The GPU requirements file uses `-c requirements.txt`, so packages such as
+DeepSpeed cannot silently upgrade Torch beyond the repo-pinned version.
 
 Optional:
 
 ```bash
-python -m pip install flash-attn --no-build-isolation
+python3 -m pip install flash-attn --no-build-isolation
 ```
 
 ## 2. Configure paths

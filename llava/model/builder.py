@@ -84,6 +84,11 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
             non_lora_trainables = {(k[11:] if k.startswith('base_model.') else k): v for k, v in non_lora_trainables.items()}
             if any(k.startswith('model.model.') for k in non_lora_trainables):
                 non_lora_trainables = {(k[6:] if k.startswith('model.') else k): v for k, v in non_lora_trainables.items()}
+            if load_4bit or load_8bit:
+                non_lora_trainables = {
+                    k: v for k, v in non_lora_trainables.items()
+                    if not k.endswith('lm_head.weight')
+                }
             model.load_state_dict(non_lora_trainables, strict=False)
 
             from HiDe.peft import PeftModel, TaskType, get_peft_model, HiDeMOELoraConfig, WEIGHTS_NAME, set_peft_model_state_dict
@@ -102,8 +107,11 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                 model.set_cur_task(
                     adapter_config.cur_task, adapter_config.expert_num
                 )
-            print('Merging LoRA weights...')
-            model = model.merge_and_unload()
+            if load_4bit or load_8bit:
+                print('Keeping LoRA adapter active for quantized inference...')
+            else:
+                print('Merging LoRA weights...')
+                model = model.merge_and_unload()
             print('Model is loaded...')
         elif model_base is not None:
             # this may be mm projector only
@@ -160,7 +168,26 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
             tokenizer.add_tokens([DEFAULT_IMAGE_PATCH_TOKEN], special_tokens=True)
         if mm_use_im_start_end:
             tokenizer.add_tokens([DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN], special_tokens=True)
-        model.resize_token_embeddings(len(tokenizer))
+        input_embeddings = model.get_input_embeddings()
+        if input_embeddings.weight.shape[0] != len(tokenizer):
+            model.resize_token_embeddings(len(tokenizer))
+        if load_4bit and device == "cuda":
+            output_embeddings = model.get_output_embeddings()
+            if (
+                output_embeddings is not None
+                and not hasattr(output_embeddings.weight, "quant_state")
+            ):
+                fp16_lm_head = torch.nn.Linear(
+                    output_embeddings.in_features,
+                    output_embeddings.out_features,
+                    bias=output_embeddings.bias is not None,
+                    device=output_embeddings.weight.device,
+                    dtype=output_embeddings.weight.dtype,
+                )
+                fp16_lm_head.weight.data.copy_(output_embeddings.weight.data)
+                if output_embeddings.bias is not None:
+                    fp16_lm_head.bias.data.copy_(output_embeddings.bias.data)
+                model.set_output_embeddings(fp16_lm_head)
 
         vision_tower = model.get_vision_tower()
         if not vision_tower.is_loaded:

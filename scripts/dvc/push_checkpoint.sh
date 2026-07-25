@@ -69,9 +69,9 @@ DVC_FILE="${CHECKPOINT_DIR}.dvc"
 
 echo "Tracking checkpoint with DVC:"
 echo "  $CHECKPOINT_DIR"
-dvc add "$CHECKPOINT_DIR"
+dvc add --force "$CHECKPOINT_DIR"
 
-git add "$DVC_FILE" .gitignore
+git add -f "$DVC_FILE" .gitignore
 
 echo
 echo "Pushing checkpoint data to DVC remote..."

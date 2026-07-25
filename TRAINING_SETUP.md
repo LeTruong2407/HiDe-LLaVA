@@ -399,10 +399,21 @@ Or run the prepared smoke test:
 bash scripts/HiDe/Train_UCIT/smoke_local.sh
 ```
 
-If you want multi-GPU Deepspeed on Linux later, install:
+If you want multi-GPU Deepspeed on Linux later, install from the repo root:
 
 ```bash
-pip install -r requirements.gpu-linux.txt
+python3 -m pip install -r requirements.txt
+python3 -m pip install -r requirements.gpu-linux.txt
+```
+
+If eval or training fails with `No module named 'torch.utils._sympy.functions'`,
+your DeepSpeed version is too new for the pinned Torch version. Restore the
+compatible stack with:
+
+```bash
+python3 -m pip install --force-reinstall torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 triton==2.0.0
+DS_BUILD_OPS=0 python3 -m pip install --force-reinstall --no-deps deepspeed==0.10.3
+python3 -m pip install --force-reinstall wandb==0.17.4
 ```
 
 ### Model path not found
