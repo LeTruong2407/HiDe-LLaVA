@@ -4,18 +4,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../paths.sh"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-EVAL_MAX_NEW_TOKENS="${EVAL_MAX_NEW_TOKENS:-32}"
+EVAL_MAX_NEW_TOKENS="${EVAL_MAX_NEW_TOKENS:-8}"
 EVAL_QUANT_ARGS="${EVAL_QUANT_ARGS:---load-4bit}"
 EVAL_MAX_SAMPLES="${EVAL_MAX_SAMPLES:-}"
 
 gpu_list="${EVAL_GPUS:-${CUDA_VISIBLE_DEVICES:-0}}"
 IFS=',' read -ra GPULIST <<< "$gpu_list"
-
 CHUNKS="${EVAL_CHUNKS:-${#GPULIST[@]}}"
 
 if [ $# -lt 2 ]; then
     echo "Usage: $0 STAGE MODELPATH [GPU]"
-    echo "Example: $0 consensus-task1 outputs/ucit_consensus/Task1_llava_lora_ours 0"
+    echo "Example: $0 consensus-task outputs/ucit_consensus/Task1_llava_lora_ours 0"
     exit 1
 fi
 
@@ -28,6 +27,8 @@ if [ -n "$GPU_ARG" ]; then
 fi
 
 RESULT_DIR="${RESULT_DIR:-./results/UCIT/each_dataset/ImageNet-R}"
+QUESTION_FILE="${QUESTION_FILE:-$INSTRUCTION_ROOT/ImageNet-R/test_3000.json}"
+ANNOTATION_FILE="${ANNOTATION_FILE:-$INSTRUCTION_ROOT/ImageNet-R/test_3000.json}"
 mkdir -p "$RESULT_DIR/$STAGE"
 
 EVAL_SAMPLE_ARGS=()
@@ -41,7 +42,7 @@ for IDX in $(seq 0 $((CHUNKS-1))); do
     CUDA_VISIBLE_DEVICES=$GPU "$PYTHON_BIN" -m llava.eval.model_answer \
         --model-path "$MODELPATH" \
         --model-base "$LLAVA_BASE_MODEL" \
-        --question-file "$INSTRUCTION_ROOT/ImageNet-R/test_3000.json" \
+        --question-file "$QUESTION_FILE" \
         --image-folder "$DATA_ROOT" \
         --text-tower "$CLIP_MODEL" \
         --answers-file "$RESULT_DIR/$STAGE/${CHUNKS}_${IDX}.jsonl" \
@@ -55,6 +56,7 @@ for IDX in $(seq 0 $((CHUNKS-1))); do
 done
 
 wait
+
 output_file="$RESULT_DIR/$STAGE/merge.jsonl"
 > "$output_file"
 
@@ -63,6 +65,6 @@ for IDX in $(seq 0 $((CHUNKS-1))); do
 done
 
 "$PYTHON_BIN" -m llava.eval.eval_deepseek_r1 \
-    --annotation-file "$INSTRUCTION_ROOT/ImageNet-R/test_3000.json" \
+    --annotation-file "$ANNOTATION_FILE" \
     --result-file "$output_file" \
     --output-dir "$RESULT_DIR/$STAGE"
