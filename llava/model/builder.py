@@ -91,6 +91,17 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
             #     from peft import PeftModel
             print('Loading LoRA weights...')
             model = PeftModel.from_pretrained(model, model_path)
+            consensus_path = os.path.join(model_path, "consensus_subspaces.pt")
+            if os.path.exists(consensus_path):
+                model.load_consensus_state(
+                    torch.load(consensus_path, map_location="cpu")
+                )
+                print(f"Loaded consensus subspaces from {consensus_path}")
+            adapter_config = model.peft_config["default"]
+            if hasattr(adapter_config, "cur_task"):
+                model.set_cur_task(
+                    adapter_config.cur_task, adapter_config.expert_num
+                )
             print('Merging LoRA weights...')
             model = model.merge_and_unload()
             print('Model is loaded...')

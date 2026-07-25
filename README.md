@@ -21,6 +21,59 @@ This repo is the official implementation of ACL 2025 paper: **[HiDe-LLaVA: Hiera
 
 Instruction tuning is widely used to enhance a pre-trained Multimodal Large Language Model (MLLM) to understand and follow human instructions by training it on a curated set of task-specific dataset. However, it is infeasible to collect all possible instruction datasets simultaneously in real-world scenarios. Thus, enabling MLLM with continual instruction tuning is essential for maintaining their adaptability. However, existing methods often trade off memory efficiency for performance gains, significantly compromising overall efficiency. In this paper, we propose a task-specific expansion and task-general fusion framework based on the variations in Centered Kernel Alignment (CKA) similarity across different model layers when trained on diverse datasets. Furthermore, we analyze the information leakage present in the existing benchmark and propose a new and more challenging benchmark to rationally evaluate the performance of different methods. Comprehensive experiments showcase a significant performance improvement of our method compared to existing state-of-the-art methods.
 
+## Codebase and Method Overview
+
+This repository extends the LLaVA 1.5 training stack with **HiDe**, a parameter-efficient method for continual multimodal instruction tuning. The central idea is hierarchical decoupling: preserve task-specific knowledge where model representations differ most across tasks, while sharing or fusing knowledge where representations remain task-general.
+
+### Method in the current implementation
+
+The base LLaVA model contains a frozen CLIP vision tower, a multimodal projector, and a causal language model. HiDe adds a bank of LoRA experts to the language model's linear layers. There is one expert slot per continual-learning task.
+
+- **Sequential task-specific expansion:** while training task `t`, only LoRA expert `t` is used. The next task reloads the previous task's adapter and non-LoRA state, then trains its own expert. This limits interference with experts learned for earlier tasks.
+- **Task prototypes:** frozen CLIP image and text encoders produce a global image feature and a pooled instruction feature. During training, running means of these features are stored as the image and text anchors for the current task.
+- **Hierarchical inference fusion:** in decoder layers before the final layer, the LoRA weights of all learned experts are added together as task-general knowledge. In the final decoder layer, cosine similarity between the current sample and every stored image/text anchor is averaged and passed through a temperature-scaled softmax. These scores weight the task-specific LoRA experts.
+- **Standard multimodal generation:** LLaVA still projects CLIP patch features into the language-model embedding space, replaces the `<image>` token with those visual tokens, and optimizes the usual causal language-model loss on assistant responses.
+
+In compact form, the active path is:
+
+```text
+task JSON + image
+    -> LLaVA conversation preprocessing
+    -> CLIP patch features -> multimodal projector -> visual tokens
+    -> CLIP global image/text features -> task anchors or expert weights
+    -> LLaMA with HiDe MoE-LoRA experts
+    -> assistant-token language-model loss / generated answer
+```
+
+### Continual training schedule
+
+The primary HiDe experiment path is UCIT:
+
+1. ImageNet-R
+2. ArxivQA
+3. VizWiz Caption
+4. IconQA
+5. CLEVR-Math
+6. Flickr30k Caption
+
+`Task1.sh` starts from the base LLaVA checkpoint. Every later task receives the preceding output through `--previous_task_model_path`. The shell scripts set `--cur_task` to select the expert being trained and use six experts for the six-task schedule.
+
+### Where to modify the method
+
+- `llava/train/train_MOE.py`: constructs the HiDe PEFT configuration, initializes the vision/text towers, loads the previous task, and saves adapters plus anchors.
+- `HiDe/peft/tuners/clitmoelora.py`: defines the expert LoRA matrices and the different training and inference behavior.
+- `llava/model/llava_arch.py`: updates task anchors during training and computes multimodal expert weights during inference.
+- `llava/model/language_model/llava_llama.py`: owns the task index, expert count, anchors, and sample-count boundaries.
+- `scripts/HiDe/Train_UCIT/`: defines the actual task order, datasets, checkpoints, and training hyperparameters.
+
+### Important implementation assumptions
+
+The current code assumes that LoRA rank is divisible by the number of experts, uses decoder layer index `31` as the task-specific fusion layer, initializes storage for ten anchors even though UCIT uses six experts, and uses a fixed similarity temperature of `0.1`. Earlier-layer inference currently sums learned experts with equal unit weight. These are implementation details rather than general requirements of the HiDe idea, and they are the main points to revisit when introducing a new method or changing the backbone.
+
+### Consensus-aware method
+
+See [`CONSENSUS_METHOD_TRAINING.md`](CONSENSUS_METHOD_TRAINING.md) for the Kaggle 2x16GB training runbook and [`CONSENSUS_METHOD_IMPLEMENTATION.md`](CONSENSUS_METHOD_IMPLEMENTATION.md) for implementation decisions and differences from `propose_method.tex`.
+
 ## Installation
 
 The installation of our environment is the same as [CoIN](https://github.com/zackschen/CoIN).

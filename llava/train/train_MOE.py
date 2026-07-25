@@ -70,6 +70,13 @@ class ModelArguments:
 
     task_embedding_dim: Optional[int] = field(default=64)
     expert_num: Optional[int] = field(default=None)
+    consensus_enable: bool = field(default=False)
+    consensus_rank: int = field(default=32)
+    consensus_rank_shared: int = field(default=32)
+    consensus_eta: float = field(default=0.5)
+    consensus_sample_limit: int = field(default=128)
+    consensus_samples_per_forward: int = field(default=4)
+    consensus_oversample: int = field(default=8)
 
 
 @dataclass
@@ -803,6 +810,11 @@ def load_model_from_previous_task(model, previous_task_model_path):
     filename = os.path.join(previous_task_model_path, WEIGHTS_NAME)
     adapters_weights = torch.load(filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
     load_result = set_peft_model_state_dict(model, adapters_weights, adapter_name="default")
+    consensus_path = os.path.join(previous_task_model_path, "consensus_subspaces.pt")
+    if os.path.exists(consensus_path):
+        consensus_state = torch.load(consensus_path, map_location="cpu")
+        model.load_consensus_state(consensus_state)
+        print(f"Loaded consensus subspaces from {consensus_path}")
     print('Model is loaded...')
 
 def train():
@@ -890,6 +902,13 @@ def train():
                 "task_embedding_dim": model_args.task_embedding_dim,
                 "expert_num": model_args.expert_num,
                 "cur_task": model_args.cur_task,
+                "consensus_enable": model_args.consensus_enable,
+                "consensus_rank": model_args.consensus_rank,
+                "consensus_rank_shared": model_args.consensus_rank_shared,
+                "consensus_eta": model_args.consensus_eta,
+                "consensus_sample_limit": model_args.consensus_sample_limit,
+                "consensus_samples_per_forward": model_args.consensus_samples_per_forward,
+                "consensus_oversample": model_args.consensus_oversample,
             }
         lora_config = HiDeMOELoraConfig(
             r=training_args.lora_r,
@@ -1028,6 +1047,9 @@ def train():
     model.config.use_cache = True
 
     if training_args.lora_enable:
+        consensus_summary = None
+        if model_args.consensus_enable and training_args.local_rank in (-1, 0):
+            consensus_summary = model.finalize_consensus_task()
         model.set_boundary_for_save()
         state_dict = get_peft_state_maybe_zero_3(
             model.named_parameters(), training_args.lora_bias
@@ -1039,6 +1061,15 @@ def train():
             model.config.save_pretrained(training_args.output_dir)
             model.save_pretrained(training_args.output_dir, state_dict=state_dict)
             torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, 'non_lora_trainables.bin'))
+            if model_args.consensus_enable:
+                torch.save(
+                    model.export_consensus_state(),
+                    os.path.join(training_args.output_dir, "consensus_subspaces.pt"),
+                )
+                with open(
+                    os.path.join(training_args.output_dir, "consensus_summary.json"), "w"
+                ) as handle:
+                    json.dump(consensus_summary, handle, indent=2)
         print('image_boundary: {}'.format(torch.cat([param for param in model.image_boundary], dim=0).float().detach().cpu().numpy()))
         print('text_boundary: {}'.format(torch.cat([param for param in model.text_boundary], dim=0).float().detach().cpu().numpy()))
     else:

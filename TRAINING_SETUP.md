@@ -478,3 +478,5 @@ tar -xzf hide-llava-assets/datasets/ImageNet-R/imagenetr.tar.gz \
   -C hide-llava-assets/datasets/ImageNet-R
 
 bash scripts/HiDe/Train_UCIT/run_task1_kaggle_2x16gb.sh
+
+bash scripts/HiDe/Train_UCIT/run_all_consensus_kaggle_2x16gb.sh

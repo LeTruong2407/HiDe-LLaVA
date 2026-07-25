@@ -52,9 +52,26 @@ class HiDeMOELoraConfig(LoraConfig):
     task_embedding_dim: int = field(default=64)
     expert_num: int = field(default=4)
     cur_task: int = field(default=4)
+    consensus_enable: bool = field(default=False)
+    consensus_rank: int = field(default=32)
+    consensus_rank_shared: int = field(default=32)
+    consensus_eta: float = field(default=0.5)
+    consensus_sample_limit: int = field(default=128)
+    consensus_samples_per_forward: int = field(default=4)
+    consensus_oversample: int = field(default=8)
 
     def __post_init__(self):
         self.peft_type = PeftType.MOE_LORA_HiDe
+        if not 0.0 <= self.consensus_eta <= 1.0:
+            raise ValueError("consensus_eta must be in [0, 1]")
+        if self.consensus_rank <= 0 or self.consensus_rank_shared <= 0:
+            raise ValueError("consensus ranks must be positive")
+        if self.consensus_rank_shared > self.consensus_rank:
+            raise ValueError("consensus_rank_shared must not exceed consensus_rank")
+        if self.consensus_sample_limit < self.consensus_rank:
+            raise ValueError("consensus_sample_limit must be at least consensus_rank")
+        if self.consensus_samples_per_forward <= 0:
+            raise ValueError("consensus_samples_per_forward must be positive")
 
 
 class HiDeMOELoraModel(LoraModel):
@@ -84,6 +101,40 @@ class HiDeMOELoraModel(LoraModel):
         mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
         if self.peft_config[adapter_name].inference_mode:
             _freeze_adapter(self.model, adapter_name)
+
+    def finalize_consensus_task(self):
+        summary = {}
+        for name, module in self.model.named_modules():
+            if hasattr(module, "finalize_consensus_task"):
+                stats = module.finalize_consensus_task()
+                if stats is not None:
+                    summary[name] = stats
+        return summary
+
+    def export_consensus_state(self):
+        state = {}
+        for name, module in self.model.named_modules():
+            if hasattr(module, "export_consensus_state"):
+                module_state = module.export_consensus_state()
+                if module_state is not None:
+                    state[name] = module_state
+        return state
+
+    def load_consensus_state(self, state):
+        if not state:
+            return
+        modules = dict(self.model.named_modules())
+        missing = []
+        for name, module_state in state.items():
+            module = modules.get(name)
+            if module is not None and hasattr(module, "load_consensus_state"):
+                module.load_consensus_state(module_state)
+            else:
+                missing.append(name)
+        if missing:
+            warnings.warn(
+                f"Could not restore consensus state for {len(missing)} LoRA modules."
+            )
 
 
     def _find_and_replace(self, adapter_name):
@@ -144,11 +195,22 @@ class HiDeMOELoraModel(LoraModel):
             "task_embedding_dim": lora_config.task_embedding_dim,
             "expert_num": lora_config.expert_num,
             "cur_task": lora_config.cur_task,
+            "consensus_enable": lora_config.consensus_enable,
+            "consensus_rank": lora_config.consensus_rank,
+            "consensus_rank_shared": lora_config.consensus_rank_shared,
+            "consensus_eta": lora_config.consensus_eta,
+            "consensus_sample_limit": lora_config.consensus_sample_limit,
+            "consensus_samples_per_forward": lora_config.consensus_samples_per_forward,
+            "consensus_oversample": lora_config.consensus_oversample,
         }
         loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
 
         if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
+            if lora_config.consensus_enable:
+                raise ValueError(
+                    "Consensus-aware HiDe supports 4-bit or 16-bit training, not 8-bit."
+                )
             eightbit_kwargs = kwargs.copy()
             eightbit_kwargs.update(
                 {
@@ -170,7 +232,12 @@ class HiDeMOELoraModel(LoraModel):
                     "quant_type": target.weight.quant_type,
                 }
             )
-            new_module = Linear4bit(adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs)
+            module_cls = (
+                HiDeMOELoraLinear4bit
+                if lora_config.consensus_enable
+                else Linear4bit
+            )
+            new_module = module_cls(adapter_name, target.in_features, target.out_features, bias=bias, train_signal=training, layer=layer, expert_weight=expert_weight, **fourbit_kwargs)
         elif isinstance(target, torch.nn.Embedding):
             embedding_kwargs = kwargs.copy()
             embedding_kwargs.pop("fan_in_fan_out", None)
@@ -328,6 +395,13 @@ class HiDeMOELoraLinear(nn.Linear, HiDeMOELoraLayer):
         self.expert_num = kwargs.pop("expert_num", True)
         self.te_dim = kwargs.pop("task_embedding_dim", True)
         self.cur_task = kwargs.pop("cur_task", True)
+        self.consensus_enable = kwargs.pop("consensus_enable", False)
+        self.consensus_rank = kwargs.pop("consensus_rank", 32)
+        self.consensus_rank_shared = kwargs.pop("consensus_rank_shared", 32)
+        self.consensus_eta = kwargs.pop("consensus_eta", 0.5)
+        self.consensus_sample_limit = kwargs.pop("consensus_sample_limit", 128)
+        self.consensus_samples_per_forward = kwargs.pop("consensus_samples_per_forward", 4)
+        self.consensus_oversample = kwargs.pop("consensus_oversample", 8)
 
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
         HiDeMOELoraLayer.__init__(self, in_features=in_features, 
@@ -341,6 +415,11 @@ class HiDeMOELoraLinear(nn.Linear, HiDeMOELoraLayer):
         self.layer = layer
         self.expert_weight = expert_weight
         self.training = train_signal
+        self._consensus_samples = []
+        self._consensus_seen = 0
+        self._consensus_task_bases = []
+        self._consensus_basis = None
+        self._consensus_collect = self.consensus_enable and int(self.layer) != 31
         
         # init the Gate network
         self.lora_router = nn.ModuleDict({})
@@ -356,6 +435,97 @@ class HiDeMOELoraLinear(nn.Linear, HiDeMOELoraLayer):
         nn.Linear.reset_parameters(self)
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
+
+    def _collect_consensus_activations(self, x):
+        if not self._consensus_collect or self.consensus_sample_limit <= 0:
+            return
+        if len(self._consensus_samples) >= self.consensus_sample_limit:
+            return
+
+        with torch.no_grad():
+            rows = x.detach().reshape(-1, x.shape[-1])
+            take = min(self.consensus_samples_per_forward, rows.shape[0])
+            if take <= 0:
+                return
+            indices = torch.randperm(rows.shape[0], device=rows.device)[:take]
+            sampled = rows.index_select(0, indices).float().cpu()
+
+            for row in sampled:
+                if len(self._consensus_samples) >= self.consensus_sample_limit:
+                    break
+                self._consensus_seen += 1
+                self._consensus_samples.append(row)
+
+    def finalize_consensus_task(self):
+        if not self.consensus_enable or int(self.layer) == 31:
+            return None
+        if len(self._consensus_samples) < 2:
+            self._consensus_collect = False
+            return None
+
+        activations = torch.stack(self._consensus_samples, dim=0)
+        max_rank = min(activations.shape[0], activations.shape[1])
+        q = min(self.consensus_rank + self.consensus_oversample, max_rank)
+        if q <= 0:
+            return None
+
+        _, singular_values, right_vectors = torch.pca_lowrank(
+            activations, q=q, center=False, niter=2
+        )
+        rank = min(self.consensus_rank, right_vectors.shape[1])
+        task_basis = right_vectors[:, :rank].contiguous()
+
+        overlap = None
+        if self._consensus_task_bases:
+            previous = self._consensus_task_bases[-1].float()
+            overlap = torch.linalg.svdvals(previous.T @ task_basis).mean().item()
+
+        self._consensus_task_bases.append(task_basis.half().cpu())
+        stacked = torch.cat([basis.float() for basis in self._consensus_task_bases], dim=1)
+        shared_rank = min(self.consensus_rank_shared, stacked.shape[0], stacked.shape[1])
+        consensus, _, _ = torch.pca_lowrank(
+            stacked, q=shared_rank, center=False, niter=2
+        )
+        self._consensus_basis = consensus[:, :shared_rank].half().cpu().contiguous()
+        self._consensus_basis_runtime = None
+        self._consensus_samples = []
+        self._consensus_seen = 0
+        self._consensus_collect = False
+
+        retained = singular_values[:rank].square().sum()
+        total = singular_values.square().sum().clamp_min(1e-12)
+        return {
+            "samples": int(activations.shape[0]),
+            "rank": int(rank),
+            "captured_energy": float((retained / total).item()),
+            "previous_task_overlap": overlap,
+        }
+
+    def export_consensus_state(self):
+        if not self.consensus_enable or int(self.layer) == 31:
+            return None
+        return {
+            "task_bases": self._consensus_task_bases,
+            "consensus_basis": self._consensus_basis,
+        }
+
+    def load_consensus_state(self, state):
+        if not state:
+            return
+        self._consensus_task_bases = [basis.half().cpu() for basis in state.get("task_bases", [])]
+        basis = state.get("consensus_basis")
+        self._consensus_basis = None if basis is None else basis.half().cpu()
+        self._consensus_basis_runtime = None
+
+    def _consensus_filter(self, x):
+        if self._consensus_basis is None:
+            return x
+        runtime = getattr(self, "_consensus_basis_runtime", None)
+        if runtime is None or runtime.device != x.device or runtime.dtype != x.dtype:
+            runtime = self._consensus_basis.to(device=x.device, dtype=x.dtype)
+            self._consensus_basis_runtime = runtime
+        projected = torch.matmul(torch.matmul(x, runtime), runtime.T)
+        return self.consensus_eta * x + (1.0 - self.consensus_eta) * projected
 
 
     def merge(self):
@@ -399,6 +569,8 @@ class HiDeMOELoraLinear(nn.Linear, HiDeMOELoraLayer):
     def forward(self, x: torch.Tensor, **kwargs):
         previous_dtype = x.dtype
 
+        if self.training:
+            self._collect_consensus_activations(x)
         if self.active_adapter not in self.lora_A.keys():   # No adapter, directly use linear
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         if self.disable_adapters:   # No adapter
@@ -416,9 +588,23 @@ class HiDeMOELoraLinear(nn.Linear, HiDeMOELoraLayer):
                 result += lora_b_output * self.scaling[self.active_adapter]
             else:
                 if int(self.layer) != 31:
-                    lora_a_output = self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
-                    lora_b_output = self.lora_B[self.active_adapter](lora_a_output)
-                    result += lora_b_output * self.scaling[self.active_adapter]
+                    if self.consensus_enable and self._consensus_basis is not None:
+                        filtered = self._consensus_filter(x)
+                        filtered = self.lora_dropout[self.active_adapter](filtered)
+                        learned_experts = min(self.cur_task + 1, self.expert_num)
+                        for i in range(learned_experts):
+                            result += (
+                                self.lora_B[self.active_adapter].loraB[i](
+                                    self.lora_A[self.active_adapter].loraA[i](filtered)
+                                )
+                                * self.scaling[self.active_adapter]
+                            )
+                    else:
+                        lora_a_output = self.lora_A[self.active_adapter](
+                            self.lora_dropout[self.active_adapter](x)
+                        )
+                        lora_b_output = self.lora_B[self.active_adapter](lora_a_output)
+                        result += lora_b_output * self.scaling[self.active_adapter]
                 else:
                     for i in range(len(self.expert_weight)):
                         result += ( # lora process
@@ -435,6 +621,90 @@ class HiDeMOELoraLinear(nn.Linear, HiDeMOELoraLayer):
 
         return result
     
+
+
+if is_bnb_4bit_available():
+    class HiDeMOELoraLinear4bit(bnb.nn.Linear4bit, HiDeMOELoraLayer):
+        """HiDe expert LoRA over a frozen bitsandbytes 4-bit base layer."""
+
+        def __init__(self, adapter_name, in_features, out_features, r=0,
+                     lora_alpha=1, lora_dropout=0.0, train_signal=False,
+                     layer=0, expert_weight=None, **kwargs):
+            bnb.nn.Linear4bit.__init__(
+                self, in_features, out_features,
+                bias=kwargs.get("bias", True),
+                compute_dtype=kwargs.get("compute_dtype", torch.float32),
+                compress_statistics=kwargs.get("compress_statistics", True),
+                quant_type=kwargs.get("quant_type", "nf4"),
+            )
+            expert_num = kwargs.pop("expert_num")
+            cur_task = kwargs.pop("cur_task")
+            HiDeMOELoraLayer.__init__(
+                self, in_features=in_features, out_features=out_features,
+                expert_num=expert_num, cur_task=cur_task,
+                training=train_signal, layer=layer,
+                expert_weight=expert_weight or [],
+            )
+            self.consensus_enable = kwargs.pop("consensus_enable", False)
+            self.consensus_rank = kwargs.pop("consensus_rank", 32)
+            self.consensus_rank_shared = kwargs.pop("consensus_rank_shared", 32)
+            self.consensus_eta = kwargs.pop("consensus_eta", 0.5)
+            self.consensus_sample_limit = kwargs.pop("consensus_sample_limit", 128)
+            self.consensus_samples_per_forward = kwargs.pop("consensus_samples_per_forward", 4)
+            self.consensus_oversample = kwargs.pop("consensus_oversample", 8)
+            self._consensus_samples = []
+            self._consensus_seen = 0
+            self._consensus_task_bases = []
+            self._consensus_basis = None
+            self._consensus_collect = self.consensus_enable and int(self.layer) != 31
+            self.weight.requires_grad = False
+            self.update_layer(
+                adapter_name, r, lora_alpha, lora_dropout,
+                kwargs.pop("init_lora_weights", True),
+            )
+            self.active_adapter = adapter_name
+
+        _collect_consensus_activations = HiDeMOELoraLinear._collect_consensus_activations
+        finalize_consensus_task = HiDeMOELoraLinear.finalize_consensus_task
+        export_consensus_state = HiDeMOELoraLinear.export_consensus_state
+        load_consensus_state = HiDeMOELoraLinear.load_consensus_state
+        _consensus_filter = HiDeMOELoraLinear._consensus_filter
+
+        def forward(self, x):
+            if self.training:
+                self._collect_consensus_activations(x)
+            result = bnb.nn.Linear4bit.forward(self, x)
+            if self.disable_adapters or self.active_adapter not in self.lora_A:
+                return result
+            if self.r[self.active_adapter] <= 0:
+                return result
+
+            result = result.clone()
+            expected_dtype = result.dtype
+            adapter_dtype = self.lora_A[self.active_adapter].loraA[0].weight.dtype
+            adapter_input = x.to(adapter_dtype)
+            if self.training:
+                update = self.lora_B[self.active_adapter].loraB[self.cur_task](
+                    self.lora_A[self.active_adapter].loraA[self.cur_task](
+                        self.lora_dropout[self.active_adapter](adapter_input)
+                    )
+                )
+                result += update.to(expected_dtype) * self.scaling[self.active_adapter]
+            elif int(self.layer) != 31:
+                filtered = self._consensus_filter(adapter_input)
+                filtered = self.lora_dropout[self.active_adapter](filtered)
+                for i in range(min(self.cur_task + 1, self.expert_num)):
+                    update = self.lora_B[self.active_adapter].loraB[i](
+                        self.lora_A[self.active_adapter].loraA[i](filtered)
+                    )
+                    result += update.to(expected_dtype) * self.scaling[self.active_adapter]
+            else:
+                for i, weight in enumerate(self.expert_weight):
+                    update = self.lora_B[self.active_adapter].loraB[i](
+                        self.lora_A[self.active_adapter].loraA[i](adapter_input)
+                    )
+                    result += update.to(expected_dtype) * self.scaling[self.active_adapter] * weight
+            return result
 
 
 class HiDeMOELinearA(nn.Module):
