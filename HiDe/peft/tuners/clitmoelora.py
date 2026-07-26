@@ -601,7 +601,58 @@ class HiDeMOELoraLinear(nn.Linear, HiDeMOELoraLayer):
                 result += lora_b_output * self.scaling[self.active_adapter]
             else:
                 if int(self.layer) != 31:
-                    if self.consensus_enable and self._consensus_basis is not None:
+                    force_single_expert_id = getattr(
+                        self, "force_single_expert_id", None
+                    )
+                    if force_single_expert_id is not None:
+                        learned_experts = min(
+                            self.cur_task + 1, self.expert_num
+                        )
+                        if force_single_expert_id not in range(learned_experts):
+                            raise ValueError(
+                                "force_single_expert_id references an "
+                                "untrained expert"
+                            )
+                        adapter_input = self.lora_dropout[
+                            self.active_adapter
+                        ](x)
+                        result += (
+                            self.lora_B[self.active_adapter].loraB[
+                                force_single_expert_id
+                            ](
+                                self.lora_A[self.active_adapter].loraA[
+                                    force_single_expert_id
+                                ](adapter_input)
+                            )
+                            * self.scaling[self.active_adapter]
+                        )
+                    elif getattr(
+                        self, "adaptive_all_layer_routing", False
+                    ):
+                        learned_experts = min(
+                            self.cur_task + 1, self.expert_num
+                        )
+                        routing_weights = getattr(
+                            self, "routing_expert_weight", None
+                        )
+                        if routing_weights is None:
+                            raise RuntimeError(
+                                "Adaptive routing weights were not set"
+                            )
+                        adapter_input = self.lora_dropout[
+                            self.active_adapter
+                        ](x)
+                        for i in range(learned_experts):
+                            result += (
+                                self.lora_B[self.active_adapter].loraB[i](
+                                    self.lora_A[self.active_adapter].loraA[i](
+                                        adapter_input
+                                    )
+                                )
+                                * self.scaling[self.active_adapter]
+                                * routing_weights[i]
+                            )
+                    elif self.consensus_enable and self._consensus_basis is not None:
                         filtered = self._consensus_filter(x)
                         filtered = self.lora_dropout[self.active_adapter](filtered)
                         learned_experts = min(self.cur_task + 1, self.expert_num)
@@ -709,22 +760,77 @@ if is_bnb_4bit_available():
                 )
                 result += update.to(expected_dtype) * self.scaling[self.active_adapter]
             elif int(self.layer) != 31:
-                filtered = self._consensus_filter(adapter_input)
-                filtered = self.lora_dropout[self.active_adapter](filtered)
-                learned_experts = min(self.cur_task + 1, self.expert_num)
-                fusion_scale = (
-                    1.0 / learned_experts
-                    if self.consensus_normalize_fusion else 1.0
+                force_single_expert_id = getattr(
+                    self, "force_single_expert_id", None
                 )
-                for i in range(learned_experts):
-                    update = self.lora_B[self.active_adapter].loraB[i](
-                        self.lora_A[self.active_adapter].loraA[i](filtered)
+                if force_single_expert_id is not None:
+                    learned_experts = min(
+                        self.cur_task + 1, self.expert_num
+                    )
+                    if force_single_expert_id not in range(learned_experts):
+                        raise ValueError(
+                            "force_single_expert_id references an "
+                            "untrained expert"
+                        )
+                    update = self.lora_B[self.active_adapter].loraB[
+                        force_single_expert_id
+                    ](
+                        self.lora_A[self.active_adapter].loraA[
+                            force_single_expert_id
+                        ](
+                            self.lora_dropout[self.active_adapter](
+                                adapter_input
+                            )
+                        )
                     )
                     result += (
                         update.to(expected_dtype)
                         * self.scaling[self.active_adapter]
-                        * fusion_scale
                     )
+                elif getattr(
+                    self, "adaptive_all_layer_routing", False
+                ):
+                    routing_weights = getattr(
+                        self, "routing_expert_weight", None
+                    )
+                    if routing_weights is None:
+                        raise RuntimeError(
+                            "Adaptive routing weights were not set"
+                        )
+                    learned_experts = min(
+                        self.cur_task + 1, self.expert_num
+                    )
+                    routed_input = self.lora_dropout[
+                        self.active_adapter
+                    ](adapter_input)
+                    for i in range(learned_experts):
+                        update = self.lora_B[self.active_adapter].loraB[i](
+                            self.lora_A[self.active_adapter].loraA[i](
+                                routed_input
+                            )
+                        )
+                        result += (
+                            update.to(expected_dtype)
+                            * self.scaling[self.active_adapter]
+                            * routing_weights[i]
+                        )
+                else:
+                    filtered = self._consensus_filter(adapter_input)
+                    filtered = self.lora_dropout[self.active_adapter](filtered)
+                    learned_experts = min(self.cur_task + 1, self.expert_num)
+                    fusion_scale = (
+                        1.0 / learned_experts
+                        if self.consensus_normalize_fusion else 1.0
+                    )
+                    for i in range(learned_experts):
+                        update = self.lora_B[self.active_adapter].loraB[i](
+                            self.lora_A[self.active_adapter].loraA[i](filtered)
+                        )
+                        result += (
+                            update.to(expected_dtype)
+                            * self.scaling[self.active_adapter]
+                            * fusion_scale
+                        )
             else:
                 for i, weight in enumerate(self.expert_weight):
                     update = self.lora_B[self.active_adapter].loraB[i](

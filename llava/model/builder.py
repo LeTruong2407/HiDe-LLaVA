@@ -143,11 +143,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                 model.set_cur_task(
                     adapter_config.cur_task, adapter_config.expert_num
                 )
-            if load_4bit or load_8bit:
-                print('Keeping LoRA adapter active for quantized inference...')
-            else:
-                print('Merging LoRA weights...')
-                model = model.merge_and_unload()
+            print('Keeping HiDe LoRA experts active for inference...')
             print('Model is loaded...')
         elif model_base is not None:
             # this may be mm projector only

@@ -85,6 +85,28 @@ def eval_model(args):
         for obj in (model, getattr(model, "base_model", None), getattr(getattr(model, "base_model", None), "model", None)):
             if obj is not None:
                 setattr(obj, "force_expert_id", args.force_expert)
+    if args.isolate_expert:
+        if args.force_expert is None:
+            raise ValueError("--isolate-expert requires --force-expert")
+        isolated_modules = 0
+        for module in model.modules():
+            if hasattr(module, "consensus_enable") and hasattr(module, "lora_A"):
+                module.force_single_expert_id = args.force_expert
+                isolated_modules += 1
+        print(
+            f"Isolating expert {args.force_expert} in "
+            f"{isolated_modules} HiDe LoRA modules."
+        )
+    if args.adaptive_all_layer_routing:
+        routed_modules = 0
+        for module in model.modules():
+            if hasattr(module, "consensus_enable") and hasattr(module, "lora_A"):
+                module.adaptive_all_layer_routing = True
+                routed_modules += 1
+        print(
+            "Enabled adaptive all-layer routing in "
+            f"{routed_modules} HiDe LoRA modules."
+        )
 
     with open(os.path.expanduser(args.question_file), "r") as f:
         questions = json.load(f)
@@ -194,6 +216,11 @@ if __name__ == "__main__":
     parser.add_argument("--load-4bit", action="store_true")
     parser.add_argument("--use-cache", action="store_true")
     parser.add_argument("--force-expert", type=int, default=None)
+    parser.add_argument("--isolate-expert", action="store_true")
+    parser.add_argument(
+        "--adaptive-all-layer-routing",
+        action="store_true",
+    )
     parser.add_argument("--debug-generation", action="store_true")
     args = parser.parse_args()
 

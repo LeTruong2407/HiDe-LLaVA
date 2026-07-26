@@ -12,6 +12,7 @@ def get_args():
     parser.add_argument('--annotation-file', type=str, default='./LLaVA/cl_dataset/TextVQA/TextVQA_0.5.1_val.json')
     parser.add_argument('--result-file', type=str, default='./LLaVA/results/Instructions/TextVQA/Zero_shot/merge.jsonl')
     parser.add_argument('--output-dir', type=str)
+    parser.add_argument('--max-samples', type=int, default=None)
     return parser.parse_args()
 
 def prompt_processor(prompt):
@@ -32,36 +33,74 @@ def prompt_processor(prompt):
     return question.lower()
 
 
-def eval_single(annotation_file, result_file):
-    annotations = json.load(open(annotation_file))
-    annotations = {annotation['question_id']: annotation for annotation in annotations}
-    results = [json.loads(line) for line in open(result_file)]
+def is_correct_prediction(prediction, ground_truth):
+    prediction = prediction.strip()
+    return bool(prediction) and prediction.upper() in ground_truth.upper()
 
-    total = len(results)
+
+def eval_single(annotation_file, result_file, output_dir=None, max_samples=None):
+    with open(annotation_file, "r") as handle:
+        annotation_list = json.load(handle)
+    if max_samples is not None:
+        annotation_list = annotation_list[:max_samples]
+    annotations = {
+        str(annotation["question_id"]): annotation
+        for annotation in annotation_list
+    }
+    with open(result_file, "r") as handle:
+        results = [json.loads(line) for line in handle if line.strip()]
+
+    results_by_id = {}
+    for result in results:
+        question_id = str(result["question_id"])
+        if question_id in results_by_id:
+            raise ValueError(f"Duplicate prediction for question_id={question_id}")
+        results_by_id[question_id] = result
+
+    total = len(annotation_list)
     right = 0
     answer_gt_file = []
-    for result in results:
-        annotation = annotations[result['question_id']]
-        pred = result['text']
-        ground_truth = annotation['answer']
-        if pred.upper() == ground_truth.upper():
+    empty_predictions = 0
+    missing_predictions = 0
+    for annotation in annotation_list:
+        question_id = str(annotation["question_id"])
+        result = results_by_id.get(question_id)
+        if result is None:
+            missing_predictions += 1
+            prediction = ""
+        else:
+            prediction = result.get("text", "")
+        if not prediction.strip():
+            empty_predictions += 1
+
+        ground_truth = annotation["answer"]
+        if is_correct_prediction(prediction, ground_truth):
             right += 1
         answer_gt_file.append({
-        "pred": pred,
-        "ground_truth": ground_truth
+            "question_id": annotation["question_id"],
+            "pred": prediction,
+            "ground_truth": ground_truth,
         })
-        # if ground_truth.upper() in pred.upper():
-        #     right += 1
-    ans_gt_file = os.path.join(args.output_dir, 'ans_gt.json')
+
+    if output_dir is None:
+        output_dir = os.path.dirname(result_file) or "."
+    os.makedirs(output_dir, exist_ok=True)
+    ans_gt_file = os.path.join(output_dir, 'ans_gt.json')
     with open(ans_gt_file, "w", encoding="utf-8") as f:
         json.dump(answer_gt_file, f, ensure_ascii=False, indent=4)
 
-    print('Samples: {}\nAccuracy: {:.2f}%\n'.format(total, 100. * right / total))
-    #将结果写入文件
-    if args.output_dir is not None:
-        output_file = os.path.join(args.output_dir, 'Result.text')
-        with open(output_file, 'w') as f:
-            f.write('Samples: {}\nAccuracy: {:.2f}%\n'.format(total, 100. * right / total))
+    accuracy = 100. * right / total if total else 0.0
+    summary = (
+        f"Samples: {total}\n"
+        f"Correct: {right}\n"
+        f"Empty predictions: {empty_predictions}\n"
+        f"Missing predictions: {missing_predictions}\n"
+        f"Accuracy: {accuracy:.2f}%\n"
+    )
+    print(summary)
+    output_file = os.path.join(output_dir, 'Result.text')
+    with open(output_file, 'w') as f:
+        f.write(summary)
 
     return ans_gt_file
 
@@ -131,7 +170,12 @@ if __name__ == "__main__":
     args = get_args()
 
     if args.result_file is not None:
-        ans_gt_file = eval_single(args.annotation_file, args.result_file)
+        ans_gt_file = eval_single(
+            args.annotation_file,
+            args.result_file,
+            args.output_dir,
+            args.max_samples,
+        )
 
         # api_key = "“
 

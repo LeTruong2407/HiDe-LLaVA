@@ -5,10 +5,12 @@ SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../paths.sh"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 EVAL_MAX_NEW_TOKENS="${EVAL_MAX_NEW_TOKENS:-8}"
-EVAL_MIN_NEW_TOKENS="${EVAL_MIN_NEW_TOKENS:-0}"
-EVAL_QUANT_ARGS="${EVAL_QUANT_ARGS:---load-4bit}"
+EVAL_MIN_NEW_TOKENS="${EVAL_MIN_NEW_TOKENS:-1}"
+EVAL_QUANT_ARGS="${EVAL_QUANT_ARGS---load-4bit}"
 EVAL_MAX_SAMPLES="${EVAL_MAX_SAMPLES:-}"
 EVAL_FORCE_EXPERT="${EVAL_FORCE_EXPERT:-}"
+EVAL_ISOLATE_EXPERT="${EVAL_ISOLATE_EXPERT:-0}"
+EVAL_ADAPTIVE_ALL_LAYER_ROUTING="${EVAL_ADAPTIVE_ALL_LAYER_ROUTING:-0}"
 EVAL_DEBUG_GENERATION="${EVAL_DEBUG_GENERATION:-0}"
 
 gpu_list="${EVAL_GPUS:-${CUDA_VISIBLE_DEVICES:-0}}"
@@ -35,11 +37,19 @@ ANNOTATION_FILE="${ANNOTATION_FILE:-$INSTRUCTION_ROOT/ImageNet-R/test_3000.json}
 mkdir -p "$RESULT_DIR/$STAGE"
 
 EVAL_EXTRA_ARGS=()
+EVAL_SCORER_ARGS=()
 if [ -n "$EVAL_MAX_SAMPLES" ]; then
     EVAL_EXTRA_ARGS+=(--max-samples "$EVAL_MAX_SAMPLES")
+    EVAL_SCORER_ARGS+=(--max-samples "$EVAL_MAX_SAMPLES")
 fi
 if [ -n "$EVAL_FORCE_EXPERT" ]; then
     EVAL_EXTRA_ARGS+=(--force-expert "$EVAL_FORCE_EXPERT")
+fi
+if [ "$EVAL_ISOLATE_EXPERT" = "1" ]; then
+    EVAL_EXTRA_ARGS+=(--isolate-expert)
+fi
+if [ "$EVAL_ADAPTIVE_ALL_LAYER_ROUTING" = "1" ]; then
+    EVAL_EXTRA_ARGS+=(--adaptive-all-layer-routing)
 fi
 if [ "$EVAL_DEBUG_GENERATION" = "1" ]; then
     EVAL_EXTRA_ARGS+=(--debug-generation)
@@ -80,4 +90,5 @@ mv -f "$tmp_output_file" "$output_file"
 "$PYTHON_BIN" -m llava.eval.eval_imagenet \
     --test-file "$ANNOTATION_FILE" \
     --result-file "$output_file" \
-    --output-dir "$RESULT_DIR/$STAGE"
+    --output-dir "$RESULT_DIR/$STAGE" \
+    "${EVAL_SCORER_ARGS[@]}"

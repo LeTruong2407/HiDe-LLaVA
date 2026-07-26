@@ -67,6 +67,8 @@ launch_ucit_task() {
     --gradient_accumulation_steps "$TRAIN_GRAD_ACCUM_STEPS"
     --evaluation_strategy no
     --save_strategy "$TRAIN_SAVE_STRATEGY"
+    --save_steps "$TRAIN_SAVE_STEPS"
+    --save_total_limit "$TRAIN_SAVE_TOTAL_LIMIT"
     --learning_rate 2e-4
     --weight_decay 0.
     --warmup_ratio 0.03
@@ -84,6 +86,10 @@ launch_ucit_task() {
     cmd+=(--previous_task_model_path "$previous_task_model_path")
   else
     cmd+=(--pretrain_mm_mlp_adapter "$LLAVA_BASE_MODEL/mm_projector.bin")
+  fi
+
+  if [ -n "$TRAIN_RESUME_FROM_CHECKPOINT" ]; then
+    cmd+=(--resume_from_checkpoint "$TRAIN_RESUME_FROM_CHECKPOINT")
   fi
 
   if [ -n "$EXTRA_TRAIN_ARGS" ]; then

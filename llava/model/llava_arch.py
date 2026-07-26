@@ -248,6 +248,16 @@ class LlavaMetaForCausalLM(ABC):
                 'q_proj', 'k_proj', 'v_proj', 'o_proj',  # self_attn 
                 'gate_proj', 'up_proj', 'down_proj'      # mlp 
             ]
+            for layer_module in self.model.layers:
+                for proj_name in proj_names:
+                    if proj_name in ['q_proj', 'k_proj', 'v_proj', 'o_proj']:
+                        proj_layer = getattr(
+                            layer_module.self_attn, proj_name
+                        )
+                    else:
+                        proj_layer = getattr(layer_module.mlp, proj_name)
+                    proj_layer.routing_expert_weight = compute_expert_weight
+
             for proj_name in proj_names:
                 if proj_name in ['q_proj', 'k_proj', 'v_proj', 'o_proj']:
                     proj_layer = getattr(self.model.layers[-1].self_attn, proj_name)
@@ -420,4 +430,3 @@ class LlavaMetaForCausalLM(ABC):
                     p.requires_grad = False
                 for p in self.get_output_embeddings().parameters():
                     p.requires_grad = False
-

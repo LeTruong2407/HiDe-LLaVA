@@ -17,4 +17,20 @@ huggingface-cli download --repo-type dataset MMInstruction/ArxivQA \
 echo "Copying ArxivQA files into $DEST"
 cp -R "$RAW_DEST"/. "$DEST"/
 
+if [ ! -d "$DEST/images" ]; then
+  ARCHIVE="$RAW_DEST/images.tgz"
+  if [ ! -f "$ARCHIVE" ]; then
+    echo "Missing ArxivQA image archive: $ARCHIVE" >&2
+    exit 1
+  fi
+
+  echo "Extracting ArxivQA images into $DEST"
+  tar -xzf "$ARCHIVE" -C "$DEST"
+fi
+
+if [ ! -d "$DEST/images" ]; then
+  echo "ArxivQA extraction did not create the expected directory: $DEST/images" >&2
+  exit 1
+fi
+
 echo "Done: $DEST"
