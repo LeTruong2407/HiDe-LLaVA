@@ -39,6 +39,8 @@ class RunningStatList(nn.Module):
             self.register_buffer(str(index), tensor)
 
     def __getitem__(self, index):
+        if isinstance(index, slice):
+            return list(self)[index]
         return self._buffers[str(index)]
 
     def __iter__(self):

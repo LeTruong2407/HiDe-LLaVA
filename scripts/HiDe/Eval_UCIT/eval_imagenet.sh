@@ -77,7 +77,7 @@ done
 
 mv -f "$tmp_output_file" "$output_file"
 
-"$PYTHON_BIN" -m llava.eval.eval_deepseek_r1 \
-    --annotation-file "$ANNOTATION_FILE" \
+"$PYTHON_BIN" -m llava.eval.eval_imagenet \
+    --test-file "$ANNOTATION_FILE" \
     --result-file "$output_file" \
     --output-dir "$RESULT_DIR/$STAGE"

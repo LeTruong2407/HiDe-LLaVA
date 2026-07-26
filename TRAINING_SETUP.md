@@ -496,3 +496,4 @@ sh scripts/HiDe/Eval_UCIT/eval_imagenet.sh \
   consensus-task1 \
   outputs/ucit_consensus/Task1_llava_lora_ours \
   0
+modal run modal_imagenet_r_consensus.py --action prepare-assets

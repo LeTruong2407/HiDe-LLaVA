@@ -49,6 +49,24 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
             warnings.warn('There is `lora` in model name but no `model_base` is provided. If you are loading a LoRA model, please provide the `model_base` argument. Detailed instruction: https://github.com/haotian-liu/LLaVA#launch-a-model-worker-lora-weights-unmerged.')
         if 'lora' in model_name.lower() and model_base is not None:
             lora_cfg_pretrained = AutoConfig.from_pretrained(model_path)
+            base_cfg_pretrained = AutoConfig.from_pretrained(model_base)
+            for attr_name in (
+                "mm_projector_type",
+                "mm_hidden_size",
+                "mm_vision_select_layer",
+                "mm_use_im_start_end",
+                "mm_use_im_patch_token",
+                "image_aspect_ratio",
+            ):
+                if hasattr(base_cfg_pretrained, attr_name):
+                    setattr(
+                        lora_cfg_pretrained,
+                        attr_name,
+                        getattr(base_cfg_pretrained, attr_name),
+                    )
+            if text_tower is not None:
+                lora_cfg_pretrained.mm_text_tower = text_tower
+                lora_cfg_pretrained.mm_vision_tower = text_tower
             tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
             print('Loading LLaVA from base model...')
             model = LlavaLlamaForCausalLM.from_pretrained(model_base, low_cpu_mem_usage=True, config=lora_cfg_pretrained, **kwargs)
@@ -88,6 +106,24 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                 non_lora_trainables = {
                     k: v for k, v in non_lora_trainables.items()
                     if not k.endswith('lm_head.weight')
+                }
+            model_state = model.state_dict()
+            mismatched_keys = [
+                k for k, v in non_lora_trainables.items()
+                if k in model_state and model_state[k].shape != v.shape
+            ]
+            if mismatched_keys:
+                warnings.warn(
+                    "Skipping non-LoRA weights with incompatible shapes: "
+                    + ", ".join(
+                        f"{k}: checkpoint={tuple(non_lora_trainables[k].shape)} "
+                        f"model={tuple(model_state[k].shape)}"
+                        for k in mismatched_keys
+                    )
+                )
+                non_lora_trainables = {
+                    k: v for k, v in non_lora_trainables.items()
+                    if k not in mismatched_keys
                 }
             model.load_state_dict(non_lora_trainables, strict=False)
 

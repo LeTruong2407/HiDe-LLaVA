@@ -68,6 +68,35 @@ modal run modal_imagenet_r_consensus.py --action train --max-steps 20
 modal run modal_imagenet_r_consensus.py --action train
 ```
 
+The default training profile is `balanced`, tuned to use more of an A100 40GB
+than the original conservative run:
+
+```text
+train_batch=8
+grad_accum=4
+model_max_length=1536
+sample_limit=256
+samples_per_forward=8
+```
+
+To push harder:
+
+```bash
+modal run modal_imagenet_r_consensus.py --action train --profile aggressive
+```
+
+To fall back to the older low-memory settings:
+
+```bash
+modal run modal_imagenet_r_consensus.py --action train --profile safe
+```
+
+To stop a running Modal app:
+
+```bash
+bash scripts/modal/stop_modal_training.sh
+```
+
 The checkpoint is stored in the `hide-llava-outputs` volume:
 
 ```text
@@ -84,15 +113,42 @@ consensus_subspaces.pt
 consensus_summary.json
 ```
 
-## 6. Tune A100 settings
+## 6. Evaluate Task 1
 
-Defaults are conservative for a 40GB A100:
+Run a short eval first:
+
+```bash
+modal run modal_imagenet_r_consensus.py --action eval --eval-max-samples 100
+```
+
+Run the full ImageNet-R test split:
+
+```bash
+modal run modal_imagenet_r_consensus.py --action eval
+```
+
+The result is saved in the `hide-llava-outputs` volume:
 
 ```text
-train_batch=4
-grad_accum=8
-model_max_length=1024
-sample_limit=128
+results/UCIT/each_dataset/ImageNet-R/consensus-modal-a100-task1/Result.text
+```
+
+Download it locally:
+
+```bash
+modal volume get hide-llava-outputs \
+  results/UCIT/each_dataset/ImageNet-R/consensus-modal-a100-task1/Result.text \
+  Result.text
+```
+
+## 7. Tune A100 settings
+
+Profile defaults:
+
+```text
+safe:       train_batch=4,  grad_accum=8, model_max_length=1024, sample_limit=128
+balanced:   train_batch=8,  grad_accum=4, model_max_length=1536, sample_limit=256
+aggressive: train_batch=12, grad_accum=3, model_max_length=2048, sample_limit=256
 ```
 
 Override them from the Modal command:
@@ -100,10 +156,12 @@ Override them from the Modal command:
 ```bash
 modal run modal_imagenet_r_consensus.py \
   --action train \
-  --train-batch 6 \
-  --grad-accum 8 \
-  --model-max-length 1024 \
-  --sample-limit 128
+  --profile balanced \
+  --train-batch 10 \
+  --grad-accum 4 \
+  --model-max-length 1536 \
+  --sample-limit 256 \
+  --samples-per-forward 8
 ```
 
 If CUDA runs out of memory, lower `--train-batch` first, then

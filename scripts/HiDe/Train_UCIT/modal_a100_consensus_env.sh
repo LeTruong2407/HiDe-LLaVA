@@ -29,9 +29,23 @@ export CONSENSUS_NORMALIZE_FUSION="${CONSENSUS_NORMALIZE_FUSION:-True}"
 export CONSENSUS_SAMPLE_LIMIT="${CONSENSUS_SAMPLE_LIMIT:-128}"
 export CONSENSUS_SAMPLES_PER_FORWARD="${CONSENSUS_SAMPLES_PER_FORWARD:-4}"
 export CONSENSUS_OVERSAMPLE="${CONSENSUS_OVERSAMPLE:-8}"
+export CONSENSUS_QUANT_MODE="${CONSENSUS_QUANT_MODE:-4bit}"
+
+case "$CONSENSUS_QUANT_MODE" in
+  4bit)
+    MODAL_A100_QUANT_ARGS=(--bits 4)
+    ;;
+  bf16|16bit)
+    MODAL_A100_QUANT_ARGS=(--bits 16)
+    ;;
+  *)
+    echo "Unsupported CONSENSUS_QUANT_MODE='$CONSENSUS_QUANT_MODE'. Use 4bit or bf16."
+    exit 1
+    ;;
+esac
 
 MODAL_A100_CONSENSUS_EXTRA_ARGS=(
-  --bits 4
+  "${MODAL_A100_QUANT_ARGS[@]}"
   --bf16 True
   --gradient_checkpointing True
   --consensus_enable True
