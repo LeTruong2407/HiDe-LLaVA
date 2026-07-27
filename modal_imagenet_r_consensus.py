@@ -239,6 +239,95 @@ def train_ucit_task(
         outputs_volume.commit()
 
 
+@app.function(
+    gpu=GPU_TYPE,
+    timeout=12 * 60 * 60,
+    volumes={
+        str(ASSET_MOUNT): assets_volume,
+        str(OUTPUT_MOUNT): outputs_volume,
+    },
+)
+def rebuild_task_anchors(
+    task_number: int = 1,
+    batch_size: int = 32,
+    num_workers: int = 4,
+) -> None:
+    rebuild_configs = {
+        1: {
+            "data_path": (
+                ASSET_MOUNT
+                / "instructions"
+                / "ImageNet-R"
+                / "train.json"
+            ),
+            "checkpoint_name": "Task1_llava_lora_ours",
+            "previous_checkpoint_name": None,
+        },
+        2: {
+            "data_path": (
+                ASSET_MOUNT
+                / "instructions"
+                / "ArxivQA"
+                / "train_4w.json"
+            ),
+            "checkpoint_name": "Task2_llava_lora_ours",
+            "previous_checkpoint_name": "Task1_llava_lora_ours",
+        },
+    }
+    if task_number not in rebuild_configs:
+        raise ValueError("Anchor rebuilding currently supports Tasks 1 and 2")
+    rebuild_config = rebuild_configs[task_number]
+    checkpoint_dir = (
+        OUTPUT_MOUNT
+        / "ucit_consensus_modal_a100"
+        / rebuild_config["checkpoint_name"]
+    )
+    previous_checkpoint_name = rebuild_config["previous_checkpoint_name"]
+    env = {
+        "HIDE_ASSETS_ROOT": str(ASSET_MOUNT),
+    }
+    command = [
+        "python",
+        "-m",
+        "llava.train.rebuild_anchors",
+        "--task-id",
+        str(task_number - 1),
+        "--data-path",
+        str(rebuild_config["data_path"]),
+        "--image-folder",
+        str(ASSET_MOUNT / "datasets"),
+        "--model-name-or-path",
+        str(ASSET_MOUNT / "models" / "llava-v1.5-7b"),
+        "--clip-model",
+        str(
+            ASSET_MOUNT
+            / "models"
+            / "clip-vit-large-patch14-336"
+        ),
+        "--checkpoint-dir",
+        str(checkpoint_dir),
+        "--batch-size",
+        str(batch_size),
+        "--num-workers",
+        str(num_workers),
+    ]
+    if previous_checkpoint_name is not None:
+        command.extend(
+            [
+                "--previous-checkpoint-dir",
+                str(
+                    OUTPUT_MOUNT
+                    / "ucit_consensus_modal_a100"
+                    / previous_checkpoint_name
+                ),
+            ]
+        )
+    try:
+        run_checked(command, env=env)
+    finally:
+        outputs_volume.commit()
+
+
 EVAL_DATASETS = {
     "imagenet-r": {
         "script": "scripts/HiDe/Eval_UCIT/eval_imagenet.sh",
@@ -370,6 +459,8 @@ def main(
     eval_force_expert: int | None = None,
     eval_isolate_expert: bool = False,
     eval_adaptive_all_layer_routing: bool = False,
+    rebuild_batch_size: int = 32,
+    rebuild_num_workers: int = 4,
 ) -> None:
     if action == "check-assets":
         check_assets.remote()
@@ -394,6 +485,12 @@ def main(
             save_total_limit=save_total_limit,
             resume_from_checkpoint=resume_from_checkpoint,
         )
+    elif action == "rebuild-anchors":
+        rebuild_task_anchors.spawn(
+            task_number=task_number,
+            batch_size=rebuild_batch_size,
+            num_workers=rebuild_num_workers,
+        )
     elif action == "eval":
         eval_ucit_task.spawn(
             model_task_number=eval_model_task_number,
@@ -410,5 +507,5 @@ def main(
     else:
         raise ValueError(
             "action must be 'prepare-assets', 'prepare-arxivqa', "
-            "'check-assets', 'train', or 'eval'"
+            "'check-assets', 'train', 'rebuild-anchors', or 'eval'"
         )

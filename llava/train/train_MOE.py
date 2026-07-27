@@ -1102,6 +1102,9 @@ def train():
                 model_args.cur_task if model_args.consensus_enable else None
             ),
         )
+        model.reset_task_statistics(model_args.cur_task)
+
+    model.assert_running_statistics_fp32()
 
     data_module = make_supervised_data_module(tokenizer=tokenizer,
                                               data_args=data_args)

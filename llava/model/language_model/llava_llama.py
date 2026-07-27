@@ -49,6 +49,13 @@ class RunningStatList(nn.Module):
     def __len__(self):
         return len(self._buffers)
 
+    def _apply(self, fn):
+        super()._apply(fn)
+        for name, buffer in self._buffers.items():
+            if buffer is not None and torch.is_floating_point(buffer):
+                self._buffers[name] = buffer.float()
+        return self
+
 
 class LlavaLlamaModel(LlavaMetaModel, LlamaModel):
     config_class = LlavaConfig
@@ -76,16 +83,16 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
 
         # Initialize anchors
         self.image_anchors = RunningStatList(
-            [0.1 * torch.randn(1, 768) for _ in range(10)]
+            [torch.zeros(1, 768, dtype=torch.float32) for _ in range(10)]
         )
         self.text_anchors = RunningStatList(
-            [0.1 * torch.randn(1, 768) for _ in range(10)]
+            [torch.zeros(1, 768, dtype=torch.float32) for _ in range(10)]
         )
         self.image_boundary = RunningStatList(
-            [torch.ones(1, dtype=torch.float32) for _ in range(10)]
+            [torch.zeros(1, dtype=torch.float32) for _ in range(10)]
         )
         self.text_boundary = RunningStatList(
-            [torch.ones(1, dtype=torch.float32) for _ in range(10)]
+            [torch.zeros(1, dtype=torch.float32) for _ in range(10)]
         )
 
         self.expert_weight = [0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]
@@ -104,6 +111,29 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             param.requires_grad = False
         for param in self.text_boundary.parameters():
             param.requires_grad = False
+
+    def reset_task_statistics(self, task_id):
+        if not 0 <= task_id < len(self.image_anchors):
+            raise ValueError(f"Invalid task_id={task_id}")
+        with torch.no_grad():
+            self.image_anchors[task_id].zero_()
+            self.text_anchors[task_id].zero_()
+            self.image_boundary[task_id].zero_()
+            self.text_boundary[task_id].zero_()
+
+    def assert_running_statistics_fp32(self):
+        statistics = (
+            *self.image_anchors,
+            *self.text_anchors,
+            *self.image_boundary,
+            *self.text_boundary,
+        )
+        invalid = [stat.dtype for stat in statistics if stat.dtype != torch.float32]
+        if invalid:
+            raise RuntimeError(
+                "HiDe running statistics must remain FP32; "
+                f"found dtypes: {sorted(set(map(str, invalid)))}"
+            )
 
     def set_boundary_for_save(self):
         # Kept for compatibility with older entrypoints. Checkpoint collectors
